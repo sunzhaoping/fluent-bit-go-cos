@@ -135,7 +135,7 @@ func (u *COSUploader) buildCOSClient() {
 	bucketURL, _ := url.Parse(u.bucketURL)
 
 	b := &cos.BaseURL{BucketURL: bucketURL}
-
+	fmt.Printf("[parquet] new SecretID %s\n", u.cred.SecretId)
 	u.client = cos.NewClient(b, &http.Client{
 		Transport: &cos.AuthorizationTransport{
 			SecretID:     u.cred.SecretId,
@@ -214,9 +214,11 @@ func (u *COSUploader) Upload(object string, data []byte) error {
 
 	ctx := context.Background()
 
+	key := strings.TrimPrefix(object, "/")
+
 	_, err := client.Object.Put(
 		ctx,
-		object,
+		key,
 		bytes.NewReader(data),
 		nil,
 	)
@@ -239,7 +241,7 @@ func (u *COSUploader) Upload(object string, data []byte) error {
 
 		_, err = client.Object.Put(
 			ctx,
-			object,
+			key,
 			bytes.NewReader(data),
 			nil,
 		)
