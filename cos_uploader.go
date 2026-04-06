@@ -135,7 +135,11 @@ func (u *COSUploader) buildCOSClient() {
 	bucketURL, _ := url.Parse(u.bucketURL)
 
 	b := &cos.BaseURL{BucketURL: bucketURL}
-	fmt.Printf("[parquet] new SecretID %s\n", u.cred.SecretId)
+	if len(u.cred.SecretId) > 8 {
+		fmt.Printf("[parquet] new SecretID %s...%s\n", u.cred.SecretId[:4], u.cred.SecretId[len(u.cred.SecretId)-4:])
+	} else {
+		fmt.Printf("[parquet] new SecretID %s\n", u.cred.SecretId)
+	}
 	u.client = cos.NewClient(b, &http.Client{
 		Transport: &cos.AuthorizationTransport{
 			SecretID:     u.cred.SecretId,
