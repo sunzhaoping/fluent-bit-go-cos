@@ -74,7 +74,6 @@ func (p *PluginContext) Flush(data unsafe.Pointer, length int, tag string) int {
 		}
 
 		// Attach timestamp
-		row["__TIMESTAMP__"] = fluentTimestampToUnixMilli(ts)
 		row["_tag"] = tag
 
 		if err := p.writer.WriteRow(row); err != nil {

@@ -127,12 +127,14 @@ func (pw *ParquetWriter) encode(rows []map[string]interface{}, columns []string)
 		parquetRow := make(parquet.Row, 0, len(columns))
 		for _, col := range columns {
 			v := row[col]
-			defLevel := 1 // 类型为 int
 			if v == nil {
-				defLevel = 0
+				parquetRow = append(parquetRow, parquet.ValueOf(nil))
+			} else if pw.cfg.isTimestamp(col) {
+				t := normalize(v).(int64)
+				parquetRow = append(parquetRow, parquet.ValueOf(t))
+			} else {
+				parquetRow = append(parquetRow, parquet.ValueOf(normalize(v)))
 			}
-			// 关键修正：defLevel 已经是 int，直接使用
-			parquetRow = append(parquetRow, parquet.ValueOf(normalize(v)).Level(0, defLevel, 0))
 		}
 		if _, err := writer.WriteRows([]parquet.Row{parquetRow}); err != nil {
 			_ = writer.Close()
