@@ -27,6 +27,12 @@ type ParquetWriter struct {
 	schema    []string
 	schemaSet map[string]struct{}
 	timer     *time.Timer
+	closing   bool
+
+	// 列定义锁定：第一次 flush 后不再变更
+	colOrder     []string
+	colTypes     map[string]parquet.Node
+	schemaFrozen bool
 }
 
 // NewParquetWriter 创建实例
@@ -36,6 +42,7 @@ func NewParquetWriter(cfg *Config, uploader *COSUploader) *ParquetWriter {
 		uploader:  uploader,
 		rows:      make([]map[string]interface{}, 0, cfg.BatchSize),
 		schemaSet: make(map[string]struct{}),
+		colTypes:  make(map[string]parquet.Node),
 	}
 	pw.resetTimer()
 	return pw
@@ -44,25 +51,37 @@ func NewParquetWriter(cfg *Config, uploader *COSUploader) *ParquetWriter {
 // WriteRow 写入一行
 func (pw *ParquetWriter) WriteRow(row map[string]interface{}) error {
 	pw.mu.Lock()
-	defer pw.mu.Unlock()
+	if pw.closing {
+		pw.mu.Unlock()
+		return fmt.Errorf("writer is closed")
+	}
 
-	for k := range row {
-		if _, ok := pw.schemaSet[k]; !ok {
-			pw.schemaSet[k] = struct{}{}
-			pw.schema = append(pw.schema, k)
+	// schema 锁定前才登记新列
+	if !pw.schemaFrozen {
+		for k := range row {
+			if _, ok := pw.schemaSet[k]; !ok {
+				pw.schemaSet[k] = struct{}{}
+				pw.schema = append(pw.schema, k)
+			}
 		}
 	}
 
 	pw.rows = append(pw.rows, row)
 
 	if len(pw.rows) >= pw.cfg.BatchSize {
-		return pw.flushLocked()
+		err := pw.flushLocked() // 结束时持有锁
+		pw.mu.Unlock()          // 显式解锁
+		return err
 	}
+	pw.mu.Unlock()
 	return nil
 }
 
 // resetTimer 重置定时器
 func (pw *ParquetWriter) resetTimer() {
+	if pw.closing {
+		return
+	}
 	if pw.timer != nil {
 		pw.timer.Stop()
 	}
@@ -79,6 +98,32 @@ func (pw *ParquetWriter) resetTimer() {
 	})
 }
 
+// buildSchema 第一次 flush 时锁定列顺序和类型，之后不再变更
+func (pw *ParquetWriter) buildSchema(rows []map[string]interface{}) {
+	// 列顺序：SortedField 置首，其余字母序
+	cols := make([]string, 0, len(pw.schema))
+	hasSortedField := false
+	for _, c := range pw.schema {
+		if c == pw.cfg.SortedField {
+			hasSortedField = true
+			continue
+		}
+		cols = append(cols, c)
+	}
+	sort.Strings(cols)
+	if hasSortedField {
+		cols = append([]string{pw.cfg.SortedField}, cols...)
+	}
+	pw.colOrder = cols
+
+	// 基于第一批数据推断并锁定每列类型
+	for _, col := range pw.colOrder {
+		pw.colTypes[col] = pw.inferField(col, rows)
+	}
+
+	pw.schemaFrozen = true
+}
+
 // flushLocked 刷新缓冲区（调用时已持有锁，但会临时释放）
 func (pw *ParquetWriter) flushLocked() error {
 	if len(pw.rows) == 0 {
@@ -86,20 +131,38 @@ func (pw *ParquetWriter) flushLocked() error {
 	}
 
 	rows := pw.rows
-	schema := pw.sortedSchema()
 	pw.rows = make([]map[string]interface{}, 0, pw.cfg.BatchSize)
 
-	pw.mu.Unlock()
-	defer pw.mu.Lock()
-
-	buf, err := pw.encode(rows, schema)
-	if err != nil {
-		return fmt.Errorf("parquet encode: %w", err)
+	// 第一次 flush 时锁定 schema
+	if !pw.schemaFrozen {
+		pw.buildSchema(rows)
 	}
 
+	// 快照列定义（encode 在无锁阶段执行，不能直接引用 pw 字段）
+	columns := make([]string, len(pw.colOrder))
+	copy(columns, pw.colOrder)
+	colTypes := make(map[string]parquet.Node, len(pw.colTypes))
+	for k, v := range pw.colTypes {
+		colTypes[k] = v
+	}
+
+	// 释放锁执行 IO，完成后重新加锁
+	pw.mu.Unlock()
+	buf, err := pw.encode(rows, columns, colTypes)
 	key := pw.objectKey()
-	if err := pw.uploader.Upload(key, buf); err != nil {
-		return fmt.Errorf("cos upload: %w", err)
+	var uploadErr error
+	if err == nil {
+		uploadErr = pw.uploader.Upload(key, buf)
+	}
+	pw.mu.Lock()
+
+	if err != nil || uploadErr != nil {
+		// 失败时将数据回写队列头部，不丢数据
+		pw.rows = append(rows, pw.rows...)
+		if err != nil {
+			return fmt.Errorf("parquet encode: %w", err)
+		}
+		return fmt.Errorf("cos upload: %w", uploadErr)
 	}
 
 	fmt.Printf("[parquet] flushed %d rows → %s (%d bytes)\n", len(rows), key, len(buf))
@@ -107,10 +170,14 @@ func (pw *ParquetWriter) flushLocked() error {
 }
 
 // encode 编码为 Parquet 字节流
-func (pw *ParquetWriter) encode(rows []map[string]interface{}, columns []string) ([]byte, error) {
+func (pw *ParquetWriter) encode(
+	rows []map[string]interface{},
+	columns []string,
+	colTypes map[string]parquet.Node,
+) ([]byte, error) {
 	root := make(parquet.Group)
 	for _, col := range columns {
-		root[col] = pw.inferField(col, rows)
+		root[col] = colTypes[col]
 	}
 
 	schema := parquet.NewSchema("record", root)
@@ -119,36 +186,40 @@ func (pw *ParquetWriter) encode(rows []map[string]interface{}, columns []string)
 	writer := parquet.NewWriter(
 		&buf,
 		schema,
-		parquet.DataPageVersion(2),
+		parquet.DataPageVersion(1),
 		parquet.Compression(pw.compressionCodec()),
 	)
-	defer writer.Close()
 
 	for _, row := range rows {
 		parquetRow := make(parquet.Row, 0, len(columns))
-		for colIdx, col := range columns {
+		for i, col := range columns {
 			v := row[col]
+			var val parquet.Value
+
 			if v == nil {
-				parquetRow = append(parquetRow, parquet.ValueOf(nil).Level(0, 0, colIdx))
+				// null：definition level = 0
+				val = parquet.Value{}.Level(0, 0, i)
 			} else if pw.cfg.isTimestamp(col) {
-				t := normalize(v).(int64)
-				parquetRow = append(parquetRow, parquet.ValueOf(t).Level(0, 1, colIdx))
+				val = parquet.ValueOf(normalize(v).(int64)).Level(0, 1, i)
 			} else {
-				parquetRow = append(parquetRow, parquet.ValueOf(normalize(v)).Level(0, 1, colIdx))
+				val = parquet.ValueOf(normalize(v)).Level(0, 1, i)
 			}
+
+			parquetRow = append(parquetRow, val)
 		}
+
 		if _, err := writer.WriteRows([]parquet.Row{parquetRow}); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("write row: %w", err)
 		}
 	}
 
 	if err := writer.Close(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("close writer: %w", err)
 	}
 	return buf.Bytes(), nil
 }
 
-// inferField 推断字段类型（使用最新的 API）
+// inferField 推断字段类型
 func (pw *ParquetWriter) inferField(name string, rows []map[string]interface{}) parquet.Node {
 	for _, row := range rows {
 		if v, ok := row[name]; ok && v != nil {
@@ -202,27 +273,11 @@ func normalize(v interface{}) interface{} {
 		return int64(val)
 	case float32:
 		return float64(val)
+	case bool:
+		return val
 	default:
 		return []byte(fmt.Sprintf("%v", val))
 	}
-}
-
-// sortedSchema 排序字段
-func (pw *ParquetWriter) sortedSchema() []string {
-	cols := make([]string, 0, len(pw.schema))
-	hasSortedField := false
-	for _, c := range pw.schema {
-		if c == pw.cfg.SortedField {
-			hasSortedField = true
-			continue
-		}
-		cols = append(cols, c)
-	}
-	sort.Strings(cols)
-	if hasSortedField {
-		cols = append([]string{pw.cfg.SortedField}, cols...)
-	}
-	return cols
 }
 
 // objectKey 生成对象键
@@ -233,7 +288,6 @@ func (pw *ParquetWriter) objectKey() string {
 	}
 	now := time.Now().In(loc)
 
-	// 先替换常用占位符
 	key := pw.cfg.PathPrefix
 	replacements := map[string]string{
 		"%Y": fmt.Sprintf("%04d", now.Year()),
@@ -243,7 +297,6 @@ func (pw *ParquetWriter) objectKey() string {
 		"%M": fmt.Sprintf("%02d", now.Minute()),
 		"%S": fmt.Sprintf("%02d", now.Second()),
 	}
-
 	for k, v := range replacements {
 		key = strings.ReplaceAll(key, k, v)
 	}
@@ -269,12 +322,16 @@ func (pw *ParquetWriter) compressionCodec() compress.Codec {
 // Close 关闭并刷新
 func (pw *ParquetWriter) Close() error {
 	pw.mu.Lock()
-	defer pw.mu.Unlock()
+	pw.closing = true
 	if pw.timer != nil {
 		pw.timer.Stop()
 	}
-	if len(pw.rows) > 0 {
-		return pw.flushLocked()
+	if len(pw.rows) == 0 {
+		pw.mu.Unlock()
+		return nil
 	}
-	return nil
+	// flushLocked 内部会 Unlock 再 Lock，结束时持有锁
+	err := pw.flushLocked()
+	pw.mu.Unlock() // 显式解锁
+	return err
 }
