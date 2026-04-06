@@ -74,7 +74,8 @@ func (p *PluginContext) Flush(data unsafe.Pointer, length int, tag string) int {
 		}
 
 		// Attach timestamp
-		row["_tag"] = tag
+		row["__TIMESTAMP__"] = fluentTimestampToUnixMilli(ts)
+		row["__TAG__"] = tag
 
 		if err := p.writer.WriteRow(row); err != nil {
 			fmt.Printf("[cos_parquet] WriteRow error: %v\n", err)
