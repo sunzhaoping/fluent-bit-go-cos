@@ -23,6 +23,7 @@ type Config struct {
 	Compression  string // snappy | gzip | zstd | none
 
 	// Schema settings
+	TimeZone        string
 	SortedField     string
 	TimestampField  string              // name of the timestamp column
 	TimestampFields map[string]struct{} // name of the timestamp column
@@ -90,9 +91,10 @@ func loadConfig(plugin unsafe.Pointer) (*Config, error) {
 	cfg := &Config{
 		BatchSize:       1024,
 		BatchTimeout:    60,
-		Compression:     "snappy",
+		Compression:     "none",
 		TimestampField:  "timestamp",
 		PathPrefix:      "fluent-bit/",
+		TimeZone:        "Asia/Tokyo",
 		TimestampFields: make(map[string]struct{}),
 	}
 
@@ -128,6 +130,10 @@ func loadConfig(plugin unsafe.Pointer) (*Config, error) {
 
 	if v := get("SortedField"); v != "" {
 		cfg.SortedField = v
+	}
+
+	if v := get("TimeZone"); v != "" {
+		cfg.TimeZone = v
 	}
 
 	if v := get("TimestampField"); v != "" {

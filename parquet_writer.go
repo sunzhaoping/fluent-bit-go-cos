@@ -225,7 +225,11 @@ func (pw *ParquetWriter) sortedSchema() []string {
 
 // objectKey 生成对象键
 func (pw *ParquetWriter) objectKey() string {
-	now := time.Now().UTC()
+	loc, err := time.LoadLocation(pw.cfg.TimeZone)
+	if err != nil {
+		panic(err)
+	}
+	now := time.Now().In(loc)
 
 	// 先替换常用占位符
 	key := pw.cfg.PathPrefix
