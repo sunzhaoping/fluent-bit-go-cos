@@ -113,9 +113,7 @@ func (pw *ParquetWriter) encode(rows []map[string]interface{}, columns []string)
 		root[col] = pw.inferField(col, rows)
 	}
 
-	schema := parquet.NewSchema("record", parquet.Group{
-		"A": parquet.Optional(parquet.Decimal(0, 38, parquet.FixedLenByteArrayType(16))),
-	})
+	schema := parquet.NewSchema("record", root)
 
 	var buf bytes.Buffer
 	writer := parquet.NewWriter(

@@ -88,7 +88,7 @@ func (p *PluginContext) Flush(data unsafe.Pointer, length int, tag string) int {
 // loadConfig reads all plugin parameters with sensible defaults.
 func loadConfig(plugin unsafe.Pointer) (*Config, error) {
 	cfg := &Config{
-		BatchSize:       10000,
+		BatchSize:       1024,
 		BatchTimeout:    60,
 		Compression:     "snappy",
 		TimestampField:  "timestamp",
