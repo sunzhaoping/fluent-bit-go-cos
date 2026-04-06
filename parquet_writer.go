@@ -119,25 +119,25 @@ func (pw *ParquetWriter) encode(rows []map[string]interface{}, columns []string)
 	writer := parquet.NewWriter(
 		&buf,
 		schema,
-		parquet.DataPageVersion(1),
+		parquet.DataPageVersion(2),
 		parquet.Compression(pw.compressionCodec()),
 	)
+	defer writer.Close()
 
 	for _, row := range rows {
 		parquetRow := make(parquet.Row, 0, len(columns))
-		for _, col := range columns {
+		for colIdx, col := range columns {
 			v := row[col]
 			if v == nil {
-				parquetRow = append(parquetRow, parquet.ValueOf(nil))
+				parquetRow = append(parquetRow, parquet.ValueOf(nil).Level(0, 0, colIdx))
 			} else if pw.cfg.isTimestamp(col) {
 				t := normalize(v).(int64)
-				parquetRow = append(parquetRow, parquet.ValueOf(t))
+				parquetRow = append(parquetRow, parquet.ValueOf(t).Level(0, 1, colIdx))
 			} else {
-				parquetRow = append(parquetRow, parquet.ValueOf(normalize(v)))
+				parquetRow = append(parquetRow, parquet.ValueOf(normalize(v)).Level(0, 1, colIdx))
 			}
 		}
 		if _, err := writer.WriteRows([]parquet.Row{parquetRow}); err != nil {
-			_ = writer.Close()
 			return nil, err
 		}
 	}
