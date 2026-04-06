@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/compress"
 	"github.com/parquet-go/parquet-go/compress/gzip"
@@ -108,7 +110,7 @@ func (pw *ParquetWriter) flushLocked() error {
 func (pw *ParquetWriter) encode(rows []map[string]interface{}, columns []string) ([]byte, error) {
 	root := make(parquet.Group)
 	for _, col := range columns {
-		root[col] = inferField(col, rows)
+		root[col] = pw.inferField(col, rows)
 	}
 
 	schema := parquet.NewSchema("record", parquet.Group{
@@ -147,9 +149,12 @@ func (pw *ParquetWriter) encode(rows []map[string]interface{}, columns []string)
 }
 
 // inferField 推断字段类型（使用最新的 API）
-func inferField(name string, rows []map[string]interface{}) parquet.Node {
+func (pw *ParquetWriter) inferField(name string, rows []map[string]interface{}) parquet.Node {
 	for _, row := range rows {
 		if v, ok := row[name]; ok && v != nil {
+			if pw.cfg.isTimestamp(name) {
+				return parquet.Optional(parquet.Timestamp(parquet.Millisecond))
+			}
 			switch v.(type) {
 			case int, int8, int16, int32, int64:
 				return parquet.Optional(parquet.Leaf(parquet.Int64Type))
@@ -205,17 +210,17 @@ func normalize(v interface{}) interface{} {
 // sortedSchema 排序字段
 func (pw *ParquetWriter) sortedSchema() []string {
 	cols := make([]string, 0, len(pw.schema))
-	hasTSField := false
+	hasSortedField := false
 	for _, c := range pw.schema {
-		if c == pw.cfg.TimestampField {
-			hasTSField = true
+		if c == pw.cfg.SortedField {
+			hasSortedField = true
 			continue
 		}
 		cols = append(cols, c)
 	}
 	sort.Strings(cols)
-	if hasTSField {
-		cols = append([]string{pw.cfg.TimestampField}, cols...)
+	if hasSortedField {
+		cols = append([]string{pw.cfg.SortedField}, cols...)
 	}
 	return cols
 }
@@ -223,11 +228,24 @@ func (pw *ParquetWriter) sortedSchema() []string {
 // objectKey 生成对象键
 func (pw *ParquetWriter) objectKey() string {
 	now := time.Now().UTC()
-	return fmt.Sprintf("%s%d/%02d/%02d/%s.parquet",
-		pw.cfg.PathPrefix,
-		now.Year(), now.Month(), now.Day(),
-		now.Format("20060102T150405.000000000Z"),
-	)
+
+	// 先替换常用占位符
+	key := pw.cfg.PathPrefix
+	replacements := map[string]string{
+		"%Y": fmt.Sprintf("%04d", now.Year()),
+		"%m": fmt.Sprintf("%02d", now.Month()),
+		"%d": fmt.Sprintf("%02d", now.Day()),
+		"%H": fmt.Sprintf("%02d", now.Hour()),
+		"%M": fmt.Sprintf("%02d", now.Minute()),
+		"%S": fmt.Sprintf("%02d", now.Second()),
+	}
+
+	for k, v := range replacements {
+		key = strings.ReplaceAll(key, k, v)
+	}
+
+	filename := uuid.New().String() + ".parquet"
+	return key + filename
 }
 
 // compressionCodec 压缩编解码器

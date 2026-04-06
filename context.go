@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"unsafe"
 
 	"github.com/fluent/fluent-bit-go/output"
@@ -22,7 +23,14 @@ type Config struct {
 	Compression  string // snappy | gzip | zstd | none
 
 	// Schema settings
-	TimestampField string // name of the timestamp column
+	SortedField     string
+	TimestampField  string              // name of the timestamp column
+	TimestampFields map[string]struct{} // name of the timestamp column
+}
+
+func (cfg *Config) isTimestamp(field string) bool {
+	_, ok := cfg.TimestampFields[field]
+	return ok
 }
 
 // PluginContext carries per-instance state
@@ -65,7 +73,7 @@ func (p *PluginContext) Flush(data unsafe.Pointer, length int, tag string) int {
 		}
 
 		// Attach timestamp
-		row[p.cfg.TimestampField] = fluentTimestampToUnixMilli(ts)
+		row["__TIMESTAMP__"] = fluentTimestampToUnixMilli(ts)
 		row["_tag"] = tag
 
 		if err := p.writer.WriteRow(row); err != nil {
@@ -80,11 +88,12 @@ func (p *PluginContext) Flush(data unsafe.Pointer, length int, tag string) int {
 // loadConfig reads all plugin parameters with sensible defaults.
 func loadConfig(plugin unsafe.Pointer) (*Config, error) {
 	cfg := &Config{
-		BatchSize:      10000,
-		BatchTimeout:   60,
-		Compression:    "snappy",
-		TimestampField: "timestamp",
-		PathPrefix:     "fluent-bit/",
+		BatchSize:       10000,
+		BatchTimeout:    60,
+		Compression:     "snappy",
+		TimestampField:  "timestamp",
+		PathPrefix:      "fluent-bit/",
+		TimestampFields: make(map[string]struct{}),
 	}
 
 	get := func(key string) string {
@@ -117,8 +126,15 @@ func loadConfig(plugin unsafe.Pointer) (*Config, error) {
 		cfg.Compression = v
 	}
 
+	if v := get("SortedField"); v != "" {
+		cfg.SortedField = v
+	}
+
 	if v := get("TimestampField"); v != "" {
 		cfg.TimestampField = v
+		for _, f := range strings.Split(v, ",") {
+			cfg.TimestampFields[strings.TrimSpace(f)] = struct{}{}
+		}
 	}
 
 	if v := get("BatchSize"); v != "" {
