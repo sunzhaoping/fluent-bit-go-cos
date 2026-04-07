@@ -227,7 +227,7 @@ func (pw *ParquetWriter) inferField(name string, rows []map[string]interface{}) 
 			case uint32, int64:
 				return parquet.Optional(parquet.Leaf(parquet.Int64Type))
 			case uint64:
-				return parquet.Optional(parquet.Leaf(parquet.Int96Type))
+				return parquet.Optional(parquet.Leaf(parquet.Int64Type))
 			case float32:
 				return parquet.Optional(parquet.Leaf(parquet.FloatType))
 			case float64:
@@ -269,7 +269,7 @@ func normalize(v interface{}) interface{} {
 	case uint32:
 		return int64(val)
 	case uint64:
-		return val
+		return int64(val)
 	case float32:
 		return float32(val)
 	case bool:
