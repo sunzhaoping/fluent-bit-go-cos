@@ -42,12 +42,14 @@ func NewParquetWriter(cfg *Config, uploader *COSUploader) *ParquetWriter {
 	}
 
 	pw.schema = make(parquet.Group)
+	log.Printf("%s\n", strings.Repeat("#", 16))
 	for col := range pw.cfg.FieldTypes {
 		pw.columns = append(pw.columns, col)
 		pw.colTypes[col] = pw.GetFieldType(col)
 		pw.schema[col] = pw.colTypes[col]
 		log.Printf("[parquet] field=%s type=%v\n", col, pw.colTypes[col])
 	}
+	log.Printf("%s\n", strings.Repeat("#", 16))
 	pw.resetTimer()
 	return pw
 }
