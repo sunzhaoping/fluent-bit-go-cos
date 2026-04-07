@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -193,7 +194,7 @@ func (pw *ParquetWriter) encode(
 			if v == nil {
 				val = parquet.Value{}.Level(0, 0, i)
 			} else {
-				val = parquet.ValueOf(v).Level(0, 1, i)
+				val = parquet.ValueOf(sanitizeValue(v)).Level(0, 1, i)
 			}
 			parquetRow = append(parquetRow, val)
 		}
@@ -207,6 +208,45 @@ func (pw *ParquetWriter) encode(
 		return nil, fmt.Errorf("close writer: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+func sanitizeValue(v interface{}) interface{} {
+	switch x := v.(type) {
+
+	case nil:
+		return nil
+
+	case string:
+		return x
+
+	case []byte:
+		return x
+
+	case int:
+		return int32(x)
+
+	case int32:
+		return x
+
+	case int64:
+		return x
+
+	case float32:
+		return x
+
+	case float64:
+		return x
+
+	case bool:
+		return x
+
+	case time.Time:
+		return x.UnixMilli()
+
+	default:
+		b, _ := json.Marshal(x)
+		return string(b)
+	}
 }
 
 // inferField 推断字段类型
