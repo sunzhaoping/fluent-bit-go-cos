@@ -23,15 +23,9 @@ type Config struct {
 	Compression  string // snappy | gzip | zstd | none
 
 	// Schema settings
-	TimeZone        string
-	SortedField     string
-	TimestampField  string              // name of the timestamp column
-	TimestampFields map[string]struct{} // name of the timestamp column
-}
-
-func (cfg *Config) isTimestamp(field string) bool {
-	_, ok := cfg.TimestampFields[field]
-	return ok
+	TimeZone    string
+	SortedField string
+	FieldTypes  map[string]string
 }
 
 // PluginContext carries per-instance state
@@ -89,13 +83,12 @@ func (p *PluginContext) Flush(data unsafe.Pointer, length int, tag string) int {
 // loadConfig reads all plugin parameters with sensible defaults.
 func loadConfig(plugin unsafe.Pointer) (*Config, error) {
 	cfg := &Config{
-		BatchSize:       1024,
-		BatchTimeout:    60,
-		Compression:     "none",
-		TimestampField:  "timestamp",
-		PathPrefix:      "fluent-bit/",
-		TimeZone:        "Asia/Tokyo",
-		TimestampFields: make(map[string]struct{}),
+		BatchSize:    1024,
+		BatchTimeout: 60,
+		Compression:  "none",
+		PathPrefix:   "fluent-bit/",
+		TimeZone:     "Asia/Tokyo",
+		FieldTypes:   make(map[string]string),
 	}
 
 	get := func(key string) string {
@@ -136,13 +129,6 @@ func loadConfig(plugin unsafe.Pointer) (*Config, error) {
 		cfg.TimeZone = v
 	}
 
-	if v := get("TimestampField"); v != "" {
-		cfg.TimestampField = v
-		for _, f := range strings.Split(v, ",") {
-			cfg.TimestampFields[strings.TrimSpace(f)] = struct{}{}
-		}
-	}
-
 	if v := get("BatchSize"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
@@ -159,6 +145,9 @@ func loadConfig(plugin unsafe.Pointer) (*Config, error) {
 		cfg.BatchTimeout = n
 	}
 
+	if v := get("FieldTypes"); v != "" {
+		cfg.FieldTypes = parseFieldTypes(v)
+	}
 	return cfg, nil
 }
 
@@ -170,4 +159,28 @@ func fluentTimestampToUnixMilli(ts interface{}) int64 {
 	default:
 		return 0
 	}
+}
+
+func parseFieldTypes(v string) map[string]string {
+	result := make(map[string]string)
+
+	if v == "" {
+		return result
+	}
+
+	pairs := strings.Split(v, ",")
+
+	for _, p := range pairs {
+		kv := strings.SplitN(p, ":", 2)
+		if len(kv) != 2 {
+			continue
+		}
+
+		field := strings.TrimSpace(kv[0])
+		typ := strings.TrimSpace(kv[1])
+
+		result[field] = typ
+	}
+
+	return result
 }

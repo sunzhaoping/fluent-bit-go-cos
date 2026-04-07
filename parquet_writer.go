@@ -115,7 +115,7 @@ func (pw *ParquetWriter) buildSchema(rows []map[string]interface{}) {
 
 	// 基于第一批数据推断并锁定每列类型
 	for _, col := range pw.colOrder {
-		pw.colTypes[col] = pw.inferField(col, rows)
+		pw.colTypes[col] = pw.GetFieldType(col)
 	}
 
 	pw.schemaFrozen = true
@@ -190,16 +190,11 @@ func (pw *ParquetWriter) encode(
 		for i, col := range columns {
 			v := row[col]
 			var val parquet.Value
-
 			if v == nil {
-				// null：definition level = 0
 				val = parquet.Value{}.Level(0, 0, i)
-			} else if pw.cfg.isTimestamp(col) {
-				val = parquet.ValueOf(normalize(v).(int64)).Level(0, 1, i)
 			} else {
-				val = parquet.ValueOf(normalize(v)).Level(0, 1, i)
+				val = parquet.ValueOf(v).Level(0, 1, i)
 			}
-
 			parquetRow = append(parquetRow, val)
 		}
 
@@ -215,68 +210,38 @@ func (pw *ParquetWriter) encode(
 }
 
 // inferField 推断字段类型
-func (pw *ParquetWriter) inferField(name string, rows []map[string]interface{}) parquet.Node {
-	for _, row := range rows {
-		if v, ok := row[name]; ok && v != nil {
-			if pw.cfg.isTimestamp(name) {
-				return parquet.Optional(parquet.Timestamp(parquet.Millisecond))
-			}
-			switch v.(type) {
-			case int, int8, int16, int32, uint, uint8, uint16:
-				return parquet.Optional(parquet.Leaf(parquet.Int32Type))
-			case uint32, int64:
-				return parquet.Optional(parquet.Leaf(parquet.Int64Type))
-			case uint64:
-				return parquet.Optional(parquet.Leaf(parquet.Int64Type))
-			case float32:
-				return parquet.Optional(parquet.Leaf(parquet.FloatType))
-			case float64:
-				return parquet.Optional(parquet.Leaf(parquet.DoubleType))
-			case bool:
-				return parquet.Optional(parquet.Leaf(parquet.BooleanType))
-			default:
-				return parquet.Optional(parquet.Leaf(parquet.ByteArrayType))
-			}
+func (pw *ParquetWriter) GetFieldType(name string) parquet.Node {
+	if t, ok := pw.cfg.FieldTypes[name]; ok {
+		switch t {
+		case "timestamp_nano":
+			return parquet.Optional(parquet.Timestamp(parquet.Nanosecond))
+
+		case "timestamp_milli":
+			return parquet.Optional(parquet.Timestamp(parquet.Millisecond))
+
+		case "timestamp_micro":
+			return parquet.Optional(parquet.Timestamp(parquet.Microsecond))
+
+		case "int":
+			return parquet.Optional(parquet.Leaf(parquet.Int32Type))
+
+		case "bigint":
+			return parquet.Optional(parquet.Leaf(parquet.Int64Type))
+
+		case "float":
+			return parquet.Optional(parquet.Leaf(parquet.FloatType))
+
+		case "double":
+			return parquet.Optional(parquet.Leaf(parquet.DoubleType))
+
+		case "bool":
+			return parquet.Optional(parquet.Leaf(parquet.BooleanType))
+
+		case "string":
+			return parquet.Optional(parquet.Leaf(parquet.ByteArrayType))
 		}
 	}
 	return parquet.Optional(parquet.Leaf(parquet.ByteArrayType))
-}
-
-// normalize 类型归一化
-func normalize(v interface{}) interface{} {
-	if v == nil {
-		return nil
-	}
-	switch val := v.(type) {
-	case []byte:
-		return val
-	case string:
-		return []byte(val)
-	case int:
-		return int(val)
-	case int8:
-		return int(val)
-	case int16:
-		return int(val)
-	case int32:
-		return int(val)
-	case uint:
-		return int64(val)
-	case uint8:
-		return int32(val)
-	case uint16:
-		return int32(val)
-	case uint32:
-		return int64(val)
-	case uint64:
-		return int64(val)
-	case float32:
-		return float32(val)
-	case bool:
-		return val
-	default:
-		return []byte(fmt.Sprintf("%v", val))
-	}
 }
 
 // objectKey 生成对象键
