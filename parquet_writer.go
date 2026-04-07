@@ -130,6 +130,7 @@ func (pw *ParquetWriter) encode(
 		parquet.DataPageVersion(1),
 		parquet.Compression(pw.compressionCodec()),
 	)
+	log.Printf("%v", rows)
 	parquetRows := make([]parquet.Row, 0, len(rows))
 	for _, row := range rows {
 		builder := parquet.NewRowBuilder(pw.schema)
@@ -236,7 +237,7 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string) parqu
 			}
 			return parquet.NullValue()
 
-		case "bool":
+		case "boolean":
 			switch val := v.(type) {
 			case bool:
 				return parquet.ValueOf(val)
