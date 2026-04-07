@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"log"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,60 +22,50 @@ import (
 type ParquetWriter struct {
 	cfg      *Config
 	uploader *COSUploader
-
-	mu        sync.Mutex
-	rows      []map[string]interface{}
-	schema    []string
-	schemaSet map[string]struct{}
-	timer     *time.Timer
-	closing   bool
-
-	// 列定义锁定：第一次 flush 后不再变更
-	colOrder     []string
-	colTypes     map[string]parquet.Node
-	schemaFrozen bool
+	mu       sync.Mutex
+	rows     []map[string]interface{}
+	timer    *time.Timer
+	closing  bool
+	columns  []string
+	colTypes map[string]parquet.Node
+	schema   parquet.Group
 }
 
 // NewParquetWriter 创建实例
 func NewParquetWriter(cfg *Config, uploader *COSUploader) *ParquetWriter {
 	pw := &ParquetWriter{
-		cfg:       cfg,
-		uploader:  uploader,
-		rows:      make([]map[string]interface{}, 0, cfg.BatchSize),
-		schemaSet: make(map[string]struct{}),
-		colTypes:  make(map[string]parquet.Node),
+		cfg:      cfg,
+		uploader: uploader,
+		rows:     make([]map[string]interface{}, 0, cfg.BatchSize),
+		colTypes: make(map[string]parquet.Node),
+		columns:  make([]string, 0, len(cfg.FieldTypes)),
+	}
+
+	pw.schema = make(parquet.Group)
+	for col := range pw.cfg.FieldTypes {
+		pw.columns = append(pw.columns, col)
+		pw.colTypes[col] = pw.GetFieldType(col)
+		pw.schema[col] = pw.colTypes[col]
+		log.Printf("[parquet] field=%s type=%v\n", col, pw.colTypes[col])
 	}
 	pw.resetTimer()
 	return pw
 }
 
-// WriteRow 写入一行
 func (pw *ParquetWriter) WriteRow(row map[string]interface{}) error {
 	if pw.closing {
 		return fmt.Errorf("writer is closed")
 	}
-
-	// schema 锁定前才登记新列
-	if !pw.schemaFrozen {
-		for k := range row {
-			if _, ok := pw.schemaSet[k]; !ok {
-				pw.schemaSet[k] = struct{}{}
-				pw.schema = append(pw.schema, k)
-			}
-		}
-	}
-
 	pw.rows = append(pw.rows, row)
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 	if len(pw.rows) >= pw.cfg.BatchSize {
-		err := pw.flushLocked() // 结束时持有锁
+		err := pw.flushLocked()
 		return err
 	}
 	return nil
 }
 
-// resetTimer 重置定时器
 func (pw *ParquetWriter) resetTimer() {
 	if pw.closing {
 		return
@@ -97,56 +86,16 @@ func (pw *ParquetWriter) resetTimer() {
 	})
 }
 
-// buildSchema 第一次 flush 时锁定列顺序和类型，之后不再变更
-func (pw *ParquetWriter) buildSchema(rows []map[string]interface{}) {
-	// 列顺序：SortedField 置首，其余字母序
-	cols := make([]string, 0, len(pw.schema))
-	hasSortedField := false
-	for _, c := range pw.schema {
-		if c == pw.cfg.SortedField {
-			hasSortedField = true
-			continue
-		}
-		cols = append(cols, c)
-	}
-	sort.Strings(cols)
-	if hasSortedField {
-		cols = append([]string{pw.cfg.SortedField}, cols...)
-	}
-	pw.colOrder = cols
-
-	// 基于第一批数据推断并锁定每列类型
-	for _, col := range pw.colOrder {
-		pw.colTypes[col] = pw.GetFieldType(col)
-	}
-
-	pw.schemaFrozen = true
-}
-
 // flushLocked 刷新缓冲区（调用时已持有锁，但会临时释放）
 func (pw *ParquetWriter) flushLocked() error {
 	if len(pw.rows) == 0 {
 		return nil
 	}
-
 	rows := pw.rows
 	pw.rows = make([]map[string]interface{}, 0, pw.cfg.BatchSize)
 
-	// 第一次 flush 时锁定 schema
-	if !pw.schemaFrozen {
-		pw.buildSchema(rows)
-	}
-
-	// 快照列定义（encode 在无锁阶段执行，不能直接引用 pw 字段）
-	columns := make([]string, len(pw.colOrder))
-	copy(columns, pw.colOrder)
-	colTypes := make(map[string]parquet.Node, len(pw.colTypes))
-	for k, v := range pw.colTypes {
-		colTypes[k] = v
-	}
-
 	// 释放锁执行 IO，完成后重新加锁
-	buf, err := pw.encode(rows, columns, colTypes)
+	buf, err := pw.encode(rows)
 	key := pw.objectKey()
 	var uploadErr error
 	if err == nil {
@@ -169,28 +118,19 @@ func (pw *ParquetWriter) flushLocked() error {
 // encode 编码为 Parquet 字节流
 func (pw *ParquetWriter) encode(
 	rows []map[string]interface{},
-	columns []string,
-	colTypes map[string]parquet.Node,
 ) ([]byte, error) {
-	root := make(parquet.Group)
-	for _, col := range columns {
-		root[col] = colTypes[col]
-		log.Printf("[parquet] field=%s type=%v\n", col, colTypes[col])
-	}
-
-	schema := parquet.NewSchema("record", root)
-
+	schama := parquet.NewSchema("record", pw.schema)
 	var buf bytes.Buffer
 	writer := parquet.NewWriter(
 		&buf,
-		schema,
+		schama,
 		parquet.DataPageVersion(1),
 		parquet.Compression(pw.compressionCodec()),
 	)
 	parquetRows := make([]parquet.Row, 0, len(rows))
 	for _, row := range rows {
-		builder := parquet.NewRowBuilder(root)
-		for index, col := range columns {
+		builder := parquet.NewRowBuilder(pw.schema)
+		for index, col := range pw.columns {
 			v := row[col]
 			builder.Add(index, pw.convertToParquetValue(v, col))
 		}
