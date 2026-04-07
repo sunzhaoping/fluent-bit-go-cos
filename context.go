@@ -148,7 +148,7 @@ func loadConfig(plugin unsafe.Pointer) (*Config, error) {
 
 	if v := get("FieldTypes"); v != "" {
 		cfg.FieldTypes = parseFieldTypes(v)
-		log.Printf("[parquet]  FieldTypes=%v \n", cfg.FieldTypes)
+		log.Printf("[parquet] FieldTypes=%v \n", cfg.FieldTypes)
 	}
 	return cfg, nil
 }

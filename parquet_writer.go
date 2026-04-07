@@ -186,17 +186,17 @@ func (pw *ParquetWriter) encode(
 		parquet.DataPageVersion(1),
 		parquet.Compression(pw.compressionCodec()),
 	)
-
+	parquetRows := make([]parquet.Row, 0, len(rows))
 	for _, row := range rows {
 		builder := parquet.NewRowBuilder(root)
 		for index, col := range columns {
 			v := row[col]
 			builder.Add(index, pw.convertToParquetValue(v, col))
 		}
-		row := builder.Row()
-		if _, err := writer.WriteRows([]parquet.Row{row}); err != nil {
-			return nil, fmt.Errorf("write row: %w", err)
-		}
+		parquetRows = append(parquetRows, builder.Row())
+	}
+	if _, err := writer.WriteRows(parquetRows); err != nil {
+		return nil, fmt.Errorf("write row: %w", err)
 	}
 
 	if err := writer.Close(); err != nil {
@@ -305,7 +305,7 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string) parqu
 		case "string":
 			switch val := v.(type) {
 			case string:
-				parquet.ByteArrayValue([]byte(val))
+				return parquet.ByteArrayValue([]byte(val))
 			case []byte:
 				return parquet.ByteArrayValue(val)
 			default:
@@ -321,7 +321,6 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string) parqu
 func (pw *ParquetWriter) GetFieldType(name string) parquet.Node {
 	if t, ok := pw.cfg.FieldTypes[name]; ok {
 		switch t {
-
 		case "timestamp_nano":
 			return parquet.Optional(
 				parquet.Timestamp(parquet.Nanosecond),
@@ -364,11 +363,11 @@ func (pw *ParquetWriter) GetFieldType(name string) parquet.Node {
 
 		case "string":
 			return parquet.Optional(
-				parquet.String(),
+				parquet.Leaf(parquet.ByteArrayType),
 			)
 		}
 	}
-	return parquet.Optional(parquet.String())
+	return parquet.Optional(parquet.Leaf(parquet.ByteArrayType))
 }
 
 // objectKey 生成对象键
