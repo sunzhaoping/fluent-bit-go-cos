@@ -303,26 +303,15 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string) parqu
 			}
 			return parquet.NullValue()
 		case "string":
-			const maxStringLen = 1 << 20 // 1 MB
 			switch val := v.(type) {
 			case string:
-				if len(val) > maxStringLen {
-					val = val[:maxStringLen] + "...(truncated)"
-				}
-				return parquet.ValueOf(val)
+				parquet.ByteArrayValue([]byte(val))
 			case []byte:
-				if len(val) > maxStringLen {
-					val = val[:maxStringLen]
-				}
-				return parquet.ValueOf(string(val))
+				return parquet.ByteArrayValue(val)
 			default:
 				s := fmt.Sprintf("%v", v)
-				if len(s) > maxStringLen {
-					s = s[:maxStringLen] + "...(truncated)"
-				}
-				return parquet.ValueOf(s)
+				return parquet.ByteArrayValue([]byte(s))
 			}
-
 		}
 	}
 	return parquet.ValueOf(v)
