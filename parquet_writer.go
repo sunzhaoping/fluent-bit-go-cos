@@ -130,7 +130,6 @@ func (pw *ParquetWriter) encode(
 		parquet.DataPageVersion(1),
 		parquet.Compression(pw.compressionCodec()),
 	)
-	log.Printf("%v", rows)
 	parquetRows := make([]parquet.Row, 0, len(rows))
 	for _, row := range rows {
 		builder := parquet.NewRowBuilder(pw.schema)
@@ -259,7 +258,7 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string) parqu
 			}
 		}
 	}
-	return parquet.ValueOf(v)
+	return parquet.ByteArrayValue([]byte(fmt.Sprintf("%v", v)))
 }
 
 // inferField 推断字段类型
