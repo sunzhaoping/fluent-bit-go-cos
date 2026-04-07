@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -89,7 +90,7 @@ func (pw *ParquetWriter) resetTimer() {
 		defer pw.mu.Unlock()
 		if len(pw.rows) > 0 {
 			if err := pw.flushLocked(); err != nil {
-				fmt.Printf("[parquet] timer flush error: %v\n", err)
+				log.Printf("[parquet] timer flush error: %v\n", err)
 			}
 		}
 		pw.resetTimer()
@@ -161,7 +162,7 @@ func (pw *ParquetWriter) flushLocked() error {
 		return fmt.Errorf("cos upload: %w", uploadErr)
 	}
 
-	fmt.Printf("[parquet] flushed %d rows → %s (%d bytes)\n", len(rows), key, len(buf))
+	log.Printf("[parquet] flushed %d rows → %s (%d bytes)\n", len(rows), key, len(buf))
 	return nil
 }
 
@@ -216,7 +217,7 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string) parqu
 
 		switch t {
 		case "timestamp_nano", "timestamp_milli", "timestamp_micro":
-			fmt.Printf("[parquet] timestamp type %T\n", v)
+			log.Printf("[parquet] field=%s timestamp value type=%T", name, v)
 			switch val := v.(type) {
 			case int64:
 				return parquet.ValueOf(val)
