@@ -191,7 +191,7 @@ func (pw *ParquetWriter) encode(
 		builder := parquet.NewRowBuilder(root)
 		for index, col := range columns {
 			v := row[col]
-			builder.Add(index+1, pw.convertToParquetValue(v, col))
+			builder.Add(index, pw.convertToParquetValue(v, col))
 		}
 		row := builder.Row()
 		if _, err := writer.WriteRows([]parquet.Row{row}); err != nil {
