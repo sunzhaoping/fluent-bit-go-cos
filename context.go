@@ -72,7 +72,7 @@ func (p *PluginContext) Flush(data unsafe.Pointer, length int, tag string) int {
 		row["__TAG__"] = tag
 
 		if err := p.writer.WriteRow(row); err != nil {
-			fmt.Printf("[cos_parquet] WriteRow error: %v\n", err)
+			fmt.Printf("[parquet] WriteRow error: %v\n", err)
 			return output.FLB_RETRY
 		}
 	}
@@ -147,7 +147,7 @@ func loadConfig(plugin unsafe.Pointer) (*Config, error) {
 
 	if v := get("FieldTypes"); v != "" {
 		cfg.FieldTypes = parseFieldTypes(v)
-		fmt.Printf("[parquet] fields type %v \n", cfg.FieldTypes)
+		fmt.Printf("[parquet] new fields type %v \n", cfg.FieldTypes)
 	}
 	return cfg, nil
 }

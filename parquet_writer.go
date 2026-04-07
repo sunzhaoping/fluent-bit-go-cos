@@ -216,7 +216,7 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string) parqu
 
 		switch t {
 		case "timestamp_nano", "timestamp_milli", "timestamp_micro":
-			fmt.Printf("[parquet] timestamp type %T \n", v)
+			fmt.Printf("[parquet] timestamp type %T\n", v)
 			switch val := v.(type) {
 			case int64:
 				return parquet.ValueOf(val)
