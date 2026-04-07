@@ -50,9 +50,7 @@ func NewParquetWriter(cfg *Config, uploader *COSUploader) *ParquetWriter {
 
 // WriteRow 写入一行
 func (pw *ParquetWriter) WriteRow(row map[string]interface{}) error {
-	pw.mu.Lock()
 	if pw.closing {
-		pw.mu.Unlock()
 		return fmt.Errorf("writer is closed")
 	}
 
@@ -67,13 +65,12 @@ func (pw *ParquetWriter) WriteRow(row map[string]interface{}) error {
 	}
 
 	pw.rows = append(pw.rows, row)
-
+	pw.mu.Lock()
+	defer pw.mu.Unlock()
 	if len(pw.rows) >= pw.cfg.BatchSize {
 		err := pw.flushLocked() // 结束时持有锁
-		pw.mu.Unlock()          // 显式解锁
 		return err
 	}
-	pw.mu.Unlock()
 	return nil
 }
 
@@ -147,14 +144,12 @@ func (pw *ParquetWriter) flushLocked() error {
 	}
 
 	// 释放锁执行 IO，完成后重新加锁
-	pw.mu.Unlock()
 	buf, err := pw.encode(rows, columns, colTypes)
 	key := pw.objectKey()
 	var uploadErr error
 	if err == nil {
 		uploadErr = pw.uploader.Upload(key, buf)
 	}
-	pw.mu.Lock()
 
 	if err != nil || uploadErr != nil {
 		// 失败时将数据回写队列头部，不丢数据
@@ -326,16 +321,15 @@ func (pw *ParquetWriter) compressionCodec() compress.Codec {
 // Close 关闭并刷新
 func (pw *ParquetWriter) Close() error {
 	pw.mu.Lock()
+	defer pw.mu.Unlock()
 	pw.closing = true
 	if pw.timer != nil {
 		pw.timer.Stop()
 	}
 	if len(pw.rows) == 0 {
-		pw.mu.Unlock()
 		return nil
 	}
 	// flushLocked 内部会 Unlock 再 Lock，结束时持有锁
 	err := pw.flushLocked()
-	pw.mu.Unlock() // 显式解锁
 	return err
 }

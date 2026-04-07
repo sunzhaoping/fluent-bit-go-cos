@@ -207,7 +207,6 @@ func isCredentialError(err error) bool {
 }
 
 func (u *COSUploader) Upload(object string, data []byte) error {
-
 	u.mu.RLock()
 	client := u.client
 	u.mu.RUnlock()
