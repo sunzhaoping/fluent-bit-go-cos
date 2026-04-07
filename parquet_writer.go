@@ -321,6 +321,8 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string) parqu
 					s = s[:maxStringLen] + "...(truncated)"
 				}
 				return parquet.ValueOf(s)
+			}
+
 		}
 	}
 	return parquet.ValueOf(v)
