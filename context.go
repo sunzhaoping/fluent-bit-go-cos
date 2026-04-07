@@ -65,7 +65,7 @@ func (p *PluginContext) Flush(data unsafe.Pointer, length int, tag string) int {
 		// Convert the Fluent Bit map to a plain Go map[string]interface{}
 		row := make(map[string]interface{}, len(record)+1)
 		for k, v := range record {
-			row[fmt.Sprintf("%v", k)] = v
+			row[fmt.Sprintf("%v", k)] = normalize(v)
 		}
 
 		// Attach timestamp
@@ -79,6 +79,29 @@ func (p *PluginContext) Flush(data unsafe.Pointer, length int, tag string) int {
 	}
 
 	return output.FLB_OK
+}
+
+func normalize(v interface{}) interface{} {
+	switch val := v.(type) {
+	case []byte:
+		return string(val)
+
+	case map[interface{}]interface{}:
+		m := make(map[string]interface{})
+		for k, vv := range val {
+			m[fmt.Sprintf("%v", k)] = normalize(vv)
+		}
+		return m
+
+	case []interface{}:
+		for i, vv := range val {
+			val[i] = normalize(vv)
+		}
+		return val
+
+	default:
+		return val
+	}
 }
 
 // loadConfig reads all plugin parameters with sensible defaults.
