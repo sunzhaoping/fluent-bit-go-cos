@@ -175,6 +175,7 @@ func (pw *ParquetWriter) encode(
 	root := make(parquet.Group)
 	for _, col := range columns {
 		root[col] = colTypes[col]
+		log.Printf("[parquet] field=%s type=%v\n", col, colTypes[col])
 	}
 
 	schema := parquet.NewSchema("record", root)

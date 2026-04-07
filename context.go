@@ -148,6 +148,8 @@ func loadConfig(plugin unsafe.Pointer) (*Config, error) {
 
 	if v := get("FieldTypes"); v != "" {
 		cfg.FieldTypes = parseFieldTypes(v)
+		cfg.FieldTypes["__TIMESTAMP__"] = "timestamp"
+		cfg.FieldTypes["__TAG__"] = "string"
 		log.Printf("[parquet] FieldTypes=%v \n", cfg.FieldTypes)
 	}
 	return cfg, nil
