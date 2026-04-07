@@ -2,9 +2,9 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -188,14 +188,9 @@ func (pw *ParquetWriter) encode(
 
 	for _, row := range rows {
 		parquetRow := make(parquet.Row, 0, len(columns))
-		for i, col := range columns {
+		for _, col := range columns {
 			v := row[col]
-			var val parquet.Value
-			if v == nil {
-				val = parquet.Value{}.Level(0, 0, i)
-			} else {
-				val = parquet.ValueOf(sanitizeValue(v)).Level(0, 1, i)
-			}
+			val := pw.convertToParquetValue(v, col)
 			parquetRow = append(parquetRow, val)
 		}
 
@@ -207,81 +202,179 @@ func (pw *ParquetWriter) encode(
 	if err := writer.Close(); err != nil {
 		return nil, fmt.Errorf("close writer: %w", err)
 	}
+
 	return buf.Bytes(), nil
 }
 
-func sanitizeValue(v interface{}) interface{} {
-	switch x := v.(type) {
+func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string) parquet.Value {
 
-	case nil:
-		return nil
-
-	case string:
-		return x
-
-	case []byte:
-		return x
-
-	case int:
-		return int32(x)
-
-	case int32:
-		return x
-
-	case int64:
-		return x
-
-	case float32:
-		return x
-
-	case float64:
-		return x
-
-	case bool:
-		return x
-
-	case time.Time:
-		return x.UnixMilli()
-
-	default:
-		b, _ := json.Marshal(x)
-		return string(b)
+	if v == nil {
+		return parquet.Value{}
 	}
+
+	if t, ok := pw.cfg.FieldTypes[name]; ok {
+
+		switch t {
+
+		case "timestamp_nano", "timestamp_milli", "timestamp_micro":
+			switch val := v.(type) {
+			case int64:
+				return parquet.ValueOf(val)
+			case int:
+				return parquet.ValueOf(int64(val))
+			case float64:
+				return parquet.ValueOf(int64(val))
+			case string:
+				if i, err := strconv.ParseInt(val, 10, 64); err == nil {
+					return parquet.ValueOf(i)
+				}
+			}
+			return parquet.NullValue()
+		case "int":
+			switch val := v.(type) {
+			case int32:
+				return parquet.ValueOf(val)
+			case int:
+				return parquet.ValueOf(int32(val))
+			case int64:
+				return parquet.ValueOf(int32(val))
+			case float64:
+				return parquet.ValueOf(int32(val))
+			case string:
+				if i, err := strconv.ParseInt(val, 10, 32); err == nil {
+					return parquet.ValueOf(int32(i))
+				}
+			}
+			return parquet.NullValue()
+
+		case "bigint":
+			switch val := v.(type) {
+			case int64:
+				return parquet.ValueOf(val)
+			case int:
+				return parquet.ValueOf(int64(val))
+			case float64:
+				return parquet.ValueOf(int64(val))
+			case string:
+				if i, err := strconv.ParseInt(val, 10, 64); err == nil {
+					return parquet.ValueOf(i)
+				}
+			}
+			return parquet.NullValue()
+
+		case "float":
+			switch val := v.(type) {
+			case float32:
+				return parquet.ValueOf(val)
+			case float64:
+				return parquet.ValueOf(float32(val))
+			case int:
+				return parquet.ValueOf(float32(val))
+			case int64:
+				return parquet.ValueOf(float32(val))
+			case string:
+				if f, err := strconv.ParseFloat(val, 32); err == nil {
+					return parquet.ValueOf(float32(f))
+				}
+			}
+			return parquet.NullValue()
+
+		case "double":
+			switch val := v.(type) {
+			case float64:
+				return parquet.ValueOf(val)
+			case float32:
+				return parquet.ValueOf(float64(val))
+			case int:
+				return parquet.ValueOf(float64(val))
+			case int64:
+				return parquet.ValueOf(float64(val))
+			case string:
+				if f, err := strconv.ParseFloat(val, 64); err == nil {
+					return parquet.ValueOf(f)
+				}
+			}
+			return parquet.NullValue()
+
+		case "bool":
+			switch val := v.(type) {
+			case bool:
+				return parquet.ValueOf(val)
+			case string:
+				if b, err := strconv.ParseBool(val); err == nil {
+					return parquet.ValueOf(b)
+				}
+			}
+			return parquet.NullValue()
+
+		case "string":
+			switch val := v.(type) {
+			case string:
+				return parquet.ValueOf(val)
+			case []byte:
+				return parquet.ValueOf(string(val))
+			default:
+				return parquet.ValueOf(fmt.Sprintf("%v", v))
+			}
+		}
+	}
+	return parquet.ValueOf(v)
 }
 
 // inferField 推断字段类型
 func (pw *ParquetWriter) GetFieldType(name string) parquet.Node {
+
 	if t, ok := pw.cfg.FieldTypes[name]; ok {
+
 		switch t {
+
 		case "timestamp_nano":
-			return parquet.Optional(parquet.Timestamp(parquet.Nanosecond))
+			return parquet.Optional(
+				parquet.Timestamp(parquet.Nanosecond),
+			)
 
 		case "timestamp_milli":
-			return parquet.Optional(parquet.Timestamp(parquet.Millisecond))
+			return parquet.Optional(
+				parquet.Timestamp(parquet.Millisecond),
+			)
 
 		case "timestamp_micro":
-			return parquet.Optional(parquet.Timestamp(parquet.Microsecond))
+			return parquet.Optional(
+				parquet.Timestamp(parquet.Microsecond),
+			)
 
 		case "int":
-			return parquet.Optional(parquet.Leaf(parquet.Int32Type))
+			return parquet.Optional(
+				parquet.Leaf(parquet.Int32Type),
+			)
 
 		case "bigint":
-			return parquet.Optional(parquet.Leaf(parquet.Int64Type))
+			return parquet.Optional(
+				parquet.Leaf(parquet.Int64Type),
+			)
 
 		case "float":
-			return parquet.Optional(parquet.Leaf(parquet.FloatType))
+			return parquet.Optional(
+				parquet.Leaf(parquet.FloatType),
+			)
 
 		case "double":
-			return parquet.Optional(parquet.Leaf(parquet.DoubleType))
+			return parquet.Optional(
+				parquet.Leaf(parquet.DoubleType),
+			)
 
 		case "bool":
-			return parquet.Optional(parquet.Leaf(parquet.BooleanType))
+			return parquet.Optional(
+				parquet.Leaf(parquet.BooleanType),
+			)
 
 		case "string":
-			return parquet.Optional(parquet.Leaf(parquet.ByteArrayType))
+			return parquet.Optional(
+				parquet.String(),
+			)
 		}
 	}
-	return parquet.Optional(parquet.Leaf(parquet.ByteArrayType))
+	return parquet.Optional(parquet.String())
 }
 
 // objectKey 生成对象键
