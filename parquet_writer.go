@@ -213,7 +213,6 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string) parqu
 	if t, ok := pw.cfg.FieldTypes[name]; ok {
 		switch t {
 		case "timestamp_nano", "timestamp_milli", "timestamp_micro":
-			log.Printf("[parquet] field=%s timestamp value type=%T", name, v)
 			switch val := v.(type) {
 			case int64:
 				return parquet.ValueOf(val)
@@ -303,16 +302,25 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string) parqu
 				}
 			}
 			return parquet.NullValue()
-
 		case "string":
+			const maxStringLen = 1 << 20 // 1 MB
 			switch val := v.(type) {
 			case string:
+				if len(val) > maxStringLen {
+					val = val[:maxStringLen] + "...(truncated)"
+				}
 				return parquet.ValueOf(val)
 			case []byte:
+				if len(val) > maxStringLen {
+					val = val[:maxStringLen]
+				}
 				return parquet.ValueOf(string(val))
 			default:
-				return parquet.ValueOf(fmt.Sprintf("%v", v))
-			}
+				s := fmt.Sprintf("%v", v)
+				if len(s) > maxStringLen {
+					s = s[:maxStringLen] + "...(truncated)"
+				}
+				return parquet.ValueOf(s)
 		}
 	}
 	return parquet.ValueOf(v)
@@ -320,9 +328,7 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string) parqu
 
 // inferField 推断字段类型
 func (pw *ParquetWriter) GetFieldType(name string) parquet.Node {
-
 	if t, ok := pw.cfg.FieldTypes[name]; ok {
-
 		switch t {
 
 		case "timestamp_nano":
