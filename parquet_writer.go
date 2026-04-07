@@ -188,14 +188,13 @@ func (pw *ParquetWriter) encode(
 	)
 
 	for _, row := range rows {
-		parquetRow := make(parquet.Row, 0, len(columns))
-		for _, col := range columns {
+		builder := parquet.NewRowBuilder(root)
+		for index, col := range columns {
 			v := row[col]
-			val := pw.convertToParquetValue(v, col)
-			parquetRow = append(parquetRow, val)
+			builder.Add(index+1, pw.convertToParquetValue(v, col))
 		}
-
-		if _, err := writer.WriteRows([]parquet.Row{parquetRow}); err != nil {
+		row := builder.Row()
+		if _, err := writer.WriteRows([]parquet.Row{row}); err != nil {
 			return nil, fmt.Errorf("write row: %w", err)
 		}
 	}
@@ -208,13 +207,10 @@ func (pw *ParquetWriter) encode(
 }
 
 func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string) parquet.Value {
-
 	if v == nil {
 		return parquet.Value{}
 	}
-
 	if t, ok := pw.cfg.FieldTypes[name]; ok {
-
 		switch t {
 		case "timestamp_nano", "timestamp_milli", "timestamp_micro":
 			log.Printf("[parquet] field=%s timestamp value type=%T", name, v)
