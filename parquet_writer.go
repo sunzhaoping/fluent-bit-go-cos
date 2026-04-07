@@ -307,11 +307,11 @@ func (pw *ParquetWriter) GetFieldType(name string) parquet.Node {
 
 		case "string":
 			return parquet.Optional(
-				parquet.Leaf(parquet.ByteArrayType),
+				parquet.String(),
 			)
 		}
 	}
-	return parquet.Optional(parquet.Leaf(parquet.ByteArrayType))
+	return parquet.Optional(parquet.String())
 }
 
 // objectKey 生成对象键
