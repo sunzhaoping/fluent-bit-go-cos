@@ -227,11 +227,15 @@ func (pw *ParquetWriter) inferField(name string, rows []map[string]interface{}) 
 				return parquet.Optional(parquet.Timestamp(parquet.Millisecond))
 			}
 			switch v.(type) {
-			case int, int8, int16, int32, int64:
+			case int, int8, int16, int32, uint, uint8, uint16:
+				return parquet.Optional(parquet.Leaf(parquet.Int32Type))
+			case uint32, int64:
 				return parquet.Optional(parquet.Leaf(parquet.Int64Type))
-			case uint, uint8, uint16, uint32, uint64:
-				return parquet.Optional(parquet.Leaf(parquet.Int64Type))
-			case float32, float64:
+			case uint64:
+				return parquet.Optional(parquet.Leaf(parquet.Int96Type))
+			case float32:
+				return parquet.Optional(parquet.Leaf(parquet.FloatType))
+			case float64:
 				return parquet.Optional(parquet.Leaf(parquet.DoubleType))
 			case bool:
 				return parquet.Optional(parquet.Leaf(parquet.BooleanType))
@@ -254,25 +258,25 @@ func normalize(v interface{}) interface{} {
 	case string:
 		return []byte(val)
 	case int:
-		return int64(val)
+		return int(val)
 	case int8:
-		return int64(val)
+		return int(val)
 	case int16:
-		return int64(val)
+		return int(val)
 	case int32:
-		return int64(val)
+		return int(val)
 	case uint:
 		return int64(val)
 	case uint8:
-		return int64(val)
+		return int32(val)
 	case uint16:
-		return int64(val)
+		return int32(val)
 	case uint32:
 		return int64(val)
 	case uint64:
-		return int64(val)
+		return val
 	case float32:
-		return float64(val)
+		return float32(val)
 	case bool:
 		return val
 	default:
