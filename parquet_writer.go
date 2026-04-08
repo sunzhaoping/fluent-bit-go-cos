@@ -164,7 +164,7 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string, index
 		return parquet.NullValue().Level(0, 1, index)
 	}
 	if t, ok := pw.cfg.FieldTypes[name]; ok {
-		fmt.Printf("convert: %T -> %s\n", v, t)
+		log.Printf("convert: %T -> %s\n", v, t)
 		switch t {
 		case "timestamp_nanos", "timestamp_millis", "timestamp_micros":
 			switch val := v.(type) {
