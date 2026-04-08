@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/compress"
 	"github.com/parquet-go/parquet-go/compress/gzip"
@@ -103,7 +102,7 @@ func (pw *ParquetWriter) flushLocked() error {
 
 	// 释放锁执行 IO，完成后重新加锁
 	buf, err := pw.encode(rows)
-	key := pw.objectKey()
+	key := pw.cfg.objectKey()
 	var uploadErr error
 	if err == nil {
 		uploadErr = pw.uploader.Upload(key, buf)
@@ -421,31 +420,6 @@ func (pw *ParquetWriter) GetFieldType(name string) parquet.Node {
 		}
 	}
 	return parquet.Optional(parquet.String())
-}
-
-// objectKey 生成对象键
-func (pw *ParquetWriter) objectKey() string {
-	loc, err := time.LoadLocation(pw.cfg.TimeZone)
-	if err != nil {
-		panic(err)
-	}
-	now := time.Now().In(loc)
-
-	key := pw.cfg.PathPrefix
-	replacements := map[string]string{
-		"%Y": fmt.Sprintf("%04d", now.Year()),
-		"%m": fmt.Sprintf("%02d", now.Month()),
-		"%d": fmt.Sprintf("%02d", now.Day()),
-		"%H": fmt.Sprintf("%02d", now.Hour()),
-		"%M": fmt.Sprintf("%02d", now.Minute()),
-		"%S": fmt.Sprintf("%02d", now.Second()),
-	}
-	for k, v := range replacements {
-		key = strings.ReplaceAll(key, k, v)
-	}
-
-	filename := uuid.New().String() + ".parquet"
-	return key + filename
 }
 
 // compressionCodec 压缩编解码器

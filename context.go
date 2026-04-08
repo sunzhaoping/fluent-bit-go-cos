@@ -5,9 +5,11 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/fluent/fluent-bit-go/output"
+	"github.com/google/uuid"
 )
 
 // Config holds all plugin configuration parameters
@@ -22,20 +24,44 @@ type Config struct {
 	BatchSize    int    // number of records per parquet file
 	BatchTimeout int    // seconds before flushing incomplete batch
 	Compression  string // snappy | gzip | zstd | none
+	Format       string // parquet | json
 
 	// Schema settings
 	TimeZone      string
-	SortedField   string
 	FieldTypes    map[string]string
 	InstanceId    string
 	InstanceField string
 }
 
+func (cfg *Config) objectKey() string {
+	loc, err := time.LoadLocation(cfg.TimeZone)
+	if err != nil {
+		panic(err)
+	}
+	now := time.Now().In(loc)
+
+	key := cfg.PathPrefix
+	replacements := map[string]string{
+		"%Y": fmt.Sprintf("%04d", now.Year()),
+		"%m": fmt.Sprintf("%02d", now.Month()),
+		"%d": fmt.Sprintf("%02d", now.Day()),
+		"%H": fmt.Sprintf("%02d", now.Hour()),
+		"%M": fmt.Sprintf("%02d", now.Minute()),
+		"%S": fmt.Sprintf("%02d", now.Second()),
+	}
+	for k, v := range replacements {
+		key = strings.ReplaceAll(key, k, v)
+	}
+	filename := uuid.New().String() + ".parquet"
+	return key + filename
+}
+
 // PluginContext carries per-instance state
 type PluginContext struct {
-	cfg      *Config
-	writer   *ParquetWriter
-	uploader *COSUploader
+	cfg           *Config
+	parquetWriter *ParquetWriter
+	jsonWriter    *JsonWriter
+	uploader      *COSUploader
 }
 
 // NewPluginContext reads config from the Fluent Bit plugin handle and wires up subsystems.
@@ -45,12 +71,14 @@ func NewPluginContext(plugin unsafe.Pointer) (*PluginContext, error) {
 		return nil, fmt.Errorf("config error: %w", err)
 	}
 	uploader := NewCOSUploader(cfg.Role, cfg.BucketName, cfg.Region)
-	writer := NewParquetWriter(cfg, uploader)
+	parquetWriter := NewParquetWriter(cfg, uploader)
+	jsonWriter := NewJsonWriter(cfg, uploader)
 	cfg.InstanceId, err = uploader.fetchInstanceId()
 	return &PluginContext{
-		cfg:      cfg,
-		writer:   writer,
-		uploader: uploader,
+		cfg:           cfg,
+		parquetWriter: parquetWriter,
+		jsonWriter:    jsonWriter,
+		uploader:      uploader,
 	}, nil
 }
 
@@ -65,19 +93,25 @@ func (p *PluginContext) Flush(data unsafe.Pointer, length int, tag string) int {
 		}
 
 		// Convert the Fluent Bit map to a plain Go map[string]interface{}
-		row := make(map[string]interface{}, len(record)+1)
+		row := make(map[string]interface{}, len(record)+2)
 		for k, v := range record {
 			row[fmt.Sprintf("%v", k)] = normalize(v)
 		}
-
 		// Attach timestamp
 		row["__TIMESTAMP__"] = fluentTimestampToUnixMilli(ts)
 		row["__TAG__"] = tag
 		row[p.cfg.InstanceField] = p.cfg.InstanceId
+		if p.cfg.Format == "json" {
+			if err := p.jsonWriter.WriteRow(row); err != nil {
+				fmt.Printf("[parquet] WriteRow error: %v\n", err)
+				return output.FLB_RETRY
+			}
 
-		if err := p.writer.WriteRow(row); err != nil {
-			fmt.Printf("[parquet] WriteRow error: %v\n", err)
-			return output.FLB_RETRY
+		} else {
+			if err := p.parquetWriter.WriteRow(row); err != nil {
+				fmt.Printf("[parquet] WriteRow error: %v\n", err)
+				return output.FLB_RETRY
+			}
 		}
 	}
 
@@ -116,6 +150,7 @@ func loadConfig(plugin unsafe.Pointer) (*Config, error) {
 		PathPrefix:    "fluent-bit/",
 		TimeZone:      "Asia/Tokyo",
 		InstanceField: "instance_id",
+		Format:        "parquet",
 		FieldTypes:    make(map[string]string),
 	}
 
@@ -149,12 +184,12 @@ func loadConfig(plugin unsafe.Pointer) (*Config, error) {
 		cfg.Compression = v
 	}
 
-	if v := get("SortedField"); v != "" {
-		cfg.SortedField = v
-	}
-
 	if v := get("TimeZone"); v != "" {
 		cfg.TimeZone = v
+	}
+
+	if v := get("Format"); v != "" {
+		cfg.Format = v
 	}
 
 	if v := get("BatchSize"); v != "" {

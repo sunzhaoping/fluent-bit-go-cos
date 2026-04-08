@@ -1,0 +1,103 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"log"
+	"sync"
+	"time"
+)
+
+type JsonWriter struct {
+	cfg      *Config
+	uploader *COSUploader
+	mu       sync.Mutex
+	rows     []map[string]interface{}
+	timer    *time.Timer
+	closing  bool
+}
+
+// NewParquetWriter 创建实例
+func NewJsonWriter(cfg *Config, uploader *COSUploader) *JsonWriter {
+	jw := &JsonWriter{
+		cfg:      cfg,
+		uploader: uploader,
+		rows:     make([]map[string]interface{}, 0, cfg.BatchSize),
+	}
+	jw.resetTimer()
+	return jw
+}
+
+func (jw *JsonWriter) WriteRow(row map[string]interface{}) error {
+	if jw.closing {
+		return fmt.Errorf("writer is closed")
+	}
+	jw.rows = append(jw.rows, row)
+	jw.mu.Lock()
+	defer jw.mu.Unlock()
+	if len(jw.rows) >= jw.cfg.BatchSize {
+		err := jw.flushLocked()
+		return err
+	}
+	return nil
+}
+
+func (jw *JsonWriter) resetTimer() {
+	if jw.closing {
+		return
+	}
+	if jw.timer != nil {
+		jw.timer.Stop()
+	}
+	d := time.Duration(jw.cfg.BatchTimeout) * time.Second
+	jw.timer = time.AfterFunc(d, func() {
+		jw.mu.Lock()
+		defer jw.mu.Unlock()
+		if len(jw.rows) > 0 {
+			if err := jw.flushLocked(); err != nil {
+				log.Printf("[parquet] timer flush error: %v\n", err)
+			}
+		}
+		jw.resetTimer()
+	})
+}
+
+// flushLocked 刷新缓冲区（调用时已持有锁，但会临时释放）
+func (jw *JsonWriter) flushLocked() error {
+	if len(jw.rows) == 0 {
+		return nil
+	}
+	rows := jw.rows
+	jw.rows = make([]map[string]interface{}, 0, jw.cfg.BatchSize)
+
+	// 释放锁执行 IO，完成后重新加锁
+	buf, err := jw.encode(rows)
+	key := jw.cfg.objectKey()
+	var uploadErr error
+	if err == nil {
+		uploadErr = jw.uploader.Upload(key, buf)
+	}
+
+	if err != nil || uploadErr != nil {
+		// 失败时将数据回写队列头部，不丢数据
+		jw.rows = append(rows, jw.rows...)
+		if err != nil {
+			return fmt.Errorf("parquet encode: %w", err)
+		}
+		return fmt.Errorf("cos upload: %w", uploadErr)
+	}
+
+	log.Printf("[parquet] flushed %d rows → %s (%d bytes)\n", len(rows), key, len(buf))
+	return nil
+}
+
+func (js *JsonWriter) encode(rows []map[string]interface{}) ([]byte, error) {
+	var buf bytes.Buffer
+	for _, row := range rows {
+		val, _ := json.Marshal(row)
+		log.Printf(string(val))
+		buf.WriteString(string(val))
+	}
+	return buf.Bytes(), nil
+}
