@@ -45,13 +45,14 @@ func NewParquetWriter(cfg *Config, uploader *COSUploader) *ParquetWriter {
 		pw.colTypes[col] = pw.GetFieldType(col)
 		log.Printf("[parquet] field=%s type=%v\n", col, pw.colTypes[col])
 	}
+	pw.schema = parquet.NewSchema("record", schema)
 	for i, columnPath := range pw.schema.Columns() {
 		leaf, ok := pw.schema.Lookup(columnPath...)
 		if ok {
 			log.Printf("[parquet] columnIndex=%v field='%s' leaf='%v'\n", i, columnPath, leaf)
 		}
 	}
-	pw.schema = parquet.NewSchema("record", schema)
+
 	log.Printf("%s\n", strings.Repeat("#", 32))
 	pw.resetTimer()
 	return pw
