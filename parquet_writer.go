@@ -164,6 +164,7 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string, index
 		return parquet.NullValue().Level(0, 1, index)
 	}
 	if t, ok := pw.cfg.FieldTypes[name]; ok {
+		fmt.Printf("convert: %T -> %s\n", v, t)
 		switch t {
 		case "timestamp_nanos", "timestamp_millis", "timestamp_micros":
 			switch val := v.(type) {
@@ -178,7 +179,7 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string, index
 					return parquet.Int64Value(i).Level(0, 1, index)
 				}
 			}
-			return parquet.NullValue().Level(0, 1, index)
+			return parquet.ZeroValue(parquet.Int64).Level(0, 1, index)
 		case "int":
 			switch val := v.(type) {
 			case int32:
@@ -194,8 +195,7 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string, index
 					return parquet.Int32Value(int32(i)).Level(0, 1, index)
 				}
 			}
-			return parquet.NullValue().Level(0, 1, index)
-
+			return parquet.ZeroValue(parquet.Int64).Level(0, 1, index)
 		case "bigint":
 			switch val := v.(type) {
 			case int64:
