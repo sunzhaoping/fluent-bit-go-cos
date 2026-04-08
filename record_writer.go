@@ -7,6 +7,12 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"github.com/parquet-go/parquet-go/compress"
+	"github.com/parquet-go/parquet-go/compress/gzip"
+	"github.com/parquet-go/parquet-go/compress/snappy"
+	"github.com/parquet-go/parquet-go/compress/uncompressed"
+	"github.com/parquet-go/parquet-go/compress/zstd"
 )
 
 type JsonWriter struct {
@@ -15,6 +21,7 @@ type JsonWriter struct {
 	mu       sync.Mutex
 	rows     []map[string]interface{}
 	timer    *time.Timer
+	compress compress.Codec
 	closing  bool
 }
 
@@ -25,6 +32,7 @@ func NewJsonWriter(cfg *Config, uploader *COSUploader) *JsonWriter {
 		uploader: uploader,
 		rows:     make([]map[string]interface{}, 0, cfg.BatchSize),
 	}
+	jw.compress = jw.compressionCodec()
 	jw.resetTimer()
 	return jw
 }
@@ -92,12 +100,27 @@ func (jw *JsonWriter) flushLocked() error {
 	return nil
 }
 
-func (js *JsonWriter) encode(rows []map[string]interface{}) ([]byte, error) {
+func (jw *JsonWriter) encode(rows []map[string]interface{}) ([]byte, error) {
 	var buf bytes.Buffer
 	for _, row := range rows {
 		val, _ := json.Marshal(row)
 		log.Printf(string(val))
 		buf.WriteString(string(val))
 	}
-	return buf.Bytes(), nil
+	var compressed bytes.Buffer
+	jw.compress.Encode(compressed.Bytes(), buf.Bytes())
+	return compressed.Bytes(), nil
+}
+
+func (jw *JsonWriter) compressionCodec() compress.Codec {
+	switch jw.cfg.Compression {
+	case "gzip":
+		return &gzip.Codec{}
+	case "zstd":
+		return &zstd.Codec{}
+	case "none", "uncompressed":
+		return &uncompressed.Codec{}
+	default:
+		return &snappy.Codec{}
+	}
 }

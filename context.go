@@ -18,7 +18,7 @@ type Config struct {
 	Role       string
 	Region     string
 	BucketName string
-	PathPrefix string
+	FileName   string
 
 	// Parquet / batching settings
 	BatchSize    int    // number of records per parquet file
@@ -40,20 +40,20 @@ func (cfg *Config) objectKey() string {
 	}
 	now := time.Now().In(loc)
 
-	key := cfg.PathPrefix
+	key := cfg.FileName
 	replacements := map[string]string{
-		"%Y": fmt.Sprintf("%04d", now.Year()),
-		"%m": fmt.Sprintf("%02d", now.Month()),
-		"%d": fmt.Sprintf("%02d", now.Day()),
-		"%H": fmt.Sprintf("%02d", now.Hour()),
-		"%M": fmt.Sprintf("%02d", now.Minute()),
-		"%S": fmt.Sprintf("%02d", now.Second()),
+		"%Y":     fmt.Sprintf("%04d", now.Year()),
+		"%m":     fmt.Sprintf("%02d", now.Month()),
+		"%d":     fmt.Sprintf("%02d", now.Day()),
+		"%H":     fmt.Sprintf("%02d", now.Hour()),
+		"%M":     fmt.Sprintf("%02d", now.Minute()),
+		"%S":     fmt.Sprintf("%02d", now.Second()),
+		"{uuid}": fmt.Sprintf("%s", uuid.New().String()),
 	}
 	for k, v := range replacements {
 		key = strings.ReplaceAll(key, k, v)
 	}
-	filename := uuid.New().String() + ".parquet"
-	return key + filename
+	return key
 }
 
 // PluginContext carries per-instance state
@@ -147,7 +147,7 @@ func loadConfig(plugin unsafe.Pointer) (*Config, error) {
 		BatchSize:     1024,
 		BatchTimeout:  60,
 		Compression:   "none",
-		PathPrefix:    "fluent-bit/",
+		FileName:      "fluent-bit.parquet",
 		TimeZone:      "Asia/Tokyo",
 		InstanceField: "instance_id",
 		Format:        "parquet",
@@ -176,8 +176,8 @@ func loadConfig(plugin unsafe.Pointer) (*Config, error) {
 		return nil, fmt.Errorf("BucketName is required")
 	}
 
-	if v := get("PathPrefix"); v != "" {
-		cfg.PathPrefix = v
+	if v := get("FileName"); v != "" {
+		cfg.FileName = v
 	}
 
 	if v := get("Compression"); v != "" {
