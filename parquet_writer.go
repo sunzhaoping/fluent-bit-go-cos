@@ -40,13 +40,16 @@ func NewParquetWriter(cfg *Config, uploader *COSUploader) *ParquetWriter {
 	}
 
 	schema := make(parquet.Group)
-	parquet.NewSchema()
 	log.Printf("%s\n", strings.Repeat("#", 32))
-	log.Printf("[parquet] %v\n", pw.cfg.FieldTypes)
 	for col := range pw.cfg.FieldTypes {
 		pw.colTypes[col] = pw.GetFieldType(col)
-		pw.schema[col] = pw.colTypes[col]
 		log.Printf("[parquet] field=%s type=%v\n", col, pw.colTypes[col])
+	}
+	for i, columnPath := range pw.schema.Columns() {
+		leaf, ok := pw.schema.Lookup(columnPath...)
+		if ok {
+			log.Printf("[parquet] columnIndex=%v field='%s' leaf='%v'\n", i, columnPath, leaf)
+		}
 	}
 	pw.schema = parquet.NewSchema("record", schema)
 	log.Printf("%s\n", strings.Repeat("#", 32))
@@ -131,20 +134,16 @@ func (pw *ParquetWriter) encode(
 	for _, row := range rows {
 		parquetRow := make([]parquet.Value, len(pw.schema.Columns()))
 		for i, columnPath := range pw.schema.Columns() {
-			leaf, ok := pw.schema.Lookup(columnPath...)
-			if !ok {
-				t.Fatalf("failed to look up path %q in schema", pw.schema.Columns()[i])
-			}
 			col := columnPath[0]
 			v, ok := row[col]
 			if ok {
 				parquetRow[i] = pw.convertToParquetValue(v, col, i)
 			} else {
-				parquetRow[i] =	parquet.NullValue().Level(0, 0, index)
+				parquetRow[i] = parquet.NullValue().Level(0, 0, i)
 			}
 		}
 		if _, err := writer.WriteRows([]parquet.Row{parquetRow}); err != nil {
-				t.Fatalf("failed to write rows: %v", err)
+			log.Fatalf("failed to write rows: %v", err)
 		}
 	}
 	if err := writer.Close(); err != nil {
@@ -165,9 +164,9 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string, index
 			case int64:
 				return parquet.Int64Value(val).Level(0, 2, index)
 			case int:
-				return parquet.Int64Value((int64(val)).Level(0, 2, index)
+				return parquet.Int64Value(int64(val)).Level(0, 2, index)
 			case float64:
-				return parquet.Int64Value((int64(val)).Level(0, 2, index)
+				return parquet.Int64Value(int64(val)).Level(0, 2, index)
 			case string:
 				if i, err := strconv.ParseInt(val, 10, 64); err == nil {
 					return parquet.Int64Value(i).Level(0, 2, index)
