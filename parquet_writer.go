@@ -26,9 +26,8 @@ type ParquetWriter struct {
 	rows     []map[string]interface{}
 	timer    *time.Timer
 	closing  bool
-	columns  []string
 	colTypes map[string]parquet.Node
-	schema   parquet.Group
+	schema   *parquet.Schema
 }
 
 // NewParquetWriter 创建实例
@@ -38,18 +37,18 @@ func NewParquetWriter(cfg *Config, uploader *COSUploader) *ParquetWriter {
 		uploader: uploader,
 		rows:     make([]map[string]interface{}, 0, cfg.BatchSize),
 		colTypes: make(map[string]parquet.Node),
-		columns:  make([]string, 0, len(cfg.FieldTypes)),
 	}
 
-	pw.schema = make(parquet.Group)
+	schema := make(parquet.Group)
+	parquet.NewSchema()
 	log.Printf("%s\n", strings.Repeat("#", 32))
 	log.Printf("[parquet] %v\n", pw.cfg.FieldTypes)
 	for col := range pw.cfg.FieldTypes {
-		pw.columns = append(pw.columns, col)
 		pw.colTypes[col] = pw.GetFieldType(col)
 		pw.schema[col] = pw.colTypes[col]
 		log.Printf("[parquet] field=%s type=%v\n", col, pw.colTypes[col])
 	}
+	pw.schema = parquet.NewSchema("record", schema)
 	log.Printf("%s\n", strings.Repeat("#", 32))
 	pw.resetTimer()
 	return pw
@@ -122,22 +121,30 @@ func (pw *ParquetWriter) flushLocked() error {
 func (pw *ParquetWriter) encode(
 	rows []map[string]interface{},
 ) ([]byte, error) {
-	schema := parquet.NewSchema("root", pw.schema)
 	var buf bytes.Buffer
 	writer := parquet.NewWriter(
 		&buf,
-		schema,
+		pw.schema,
 		parquet.DataPageVersion(1),
 		parquet.Compression(pw.compressionCodec()),
 	)
 	for _, row := range rows {
-		builder := parquet.NewRowBuilder(pw.schema)
-		for index, col := range pw.columns {
-			v := row[col]
-			builder.Add(index, pw.convertToParquetValue(v, col))
+		parquetRow := make([]parquet.Value, len(pw.schema.Columns()))
+		for i, columnPath := range pw.schema.Columns() {
+			leaf, ok := pw.schema.Lookup(columnPath...)
+			if !ok {
+				t.Fatalf("failed to look up path %q in schema", pw.schema.Columns()[i])
+			}
+			col := columnPath[0]
+			v, ok := row[col]
+			if ok {
+				parquetRow[i] = pw.convertToParquetValue(v, col, i)
+			} else {
+				parquetRow[i] =	parquet.NullValue().Level(0, 0, index)
+			}
 		}
-		if err := writer.Write(builder.Row()); err != nil {
-			return nil, fmt.Errorf("write row: %w", err)
+		if _, err := writer.WriteRows([]parquet.Row{parquetRow}); err != nil {
+				t.Fatalf("failed to write rows: %v", err)
 		}
 	}
 	if err := writer.Close(); err != nil {
@@ -147,115 +154,115 @@ func (pw *ParquetWriter) encode(
 	return buf.Bytes(), nil
 }
 
-func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string) parquet.Value {
+func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string, index int) parquet.Value {
 	if v == nil {
-		return parquet.Value{}
+		return parquet.NullValue().Level(0, 1, index)
 	}
 	if t, ok := pw.cfg.FieldTypes[name]; ok {
 		switch t {
-		case "timestamp_nano", "timestamp_milli", "timestamp_micro":
+		case "timestamp_nanos", "timestamp_millis", "timestamp_micros":
 			switch val := v.(type) {
 			case int64:
-				return parquet.ValueOf(val)
+				return parquet.Int64Value(val).Level(0, 2, index)
 			case int:
-				return parquet.ValueOf(int64(val))
+				return parquet.Int64Value((int64(val)).Level(0, 2, index)
 			case float64:
-				return parquet.ValueOf(int64(val))
+				return parquet.Int64Value((int64(val)).Level(0, 2, index)
 			case string:
 				if i, err := strconv.ParseInt(val, 10, 64); err == nil {
-					return parquet.ValueOf(i)
+					return parquet.Int64Value(i).Level(0, 2, index)
 				}
 			}
-			return parquet.NullValue()
+			return parquet.NullValue().Level(0, 1, index)
 		case "int":
 			switch val := v.(type) {
 			case int32:
-				return parquet.ValueOf(val)
+				return parquet.Int32Value(val).Level(0, 2, index)
 			case int:
-				return parquet.ValueOf(int32(val))
+				return parquet.Int32Value(int32(val)).Level(0, 2, index)
 			case int64:
-				return parquet.ValueOf(int32(val))
+				return parquet.Int32Value(int32(val)).Level(0, 2, index)
 			case float64:
-				return parquet.ValueOf(int32(val))
+				return parquet.Int32Value(int32(val)).Level(0, 2, index)
 			case string:
 				if i, err := strconv.ParseInt(val, 10, 32); err == nil {
-					return parquet.ValueOf(int32(i))
+					return parquet.Int32Value(int32(i)).Level(0, 2, index)
 				}
 			}
-			return parquet.NullValue()
+			return parquet.NullValue().Level(0, 1, index)
 
 		case "bigint":
 			switch val := v.(type) {
 			case int64:
-				return parquet.ValueOf(val)
+				return parquet.Int64Value(val).Level(0, 2, index)
 			case int:
-				return parquet.ValueOf(int64(val))
+				return parquet.Int64Value(int64(val)).Level(0, 2, index)
 			case float64:
-				return parquet.ValueOf(int64(val))
+				return parquet.Int64Value(int64(val)).Level(0, 2, index)
 			case string:
 				if i, err := strconv.ParseInt(val, 10, 64); err == nil {
-					return parquet.ValueOf(i)
+					return parquet.Int64Value(i).Level(0, 2, index)
 				}
 			}
-			return parquet.NullValue()
+			return parquet.NullValue().Level(0, 1, index)
 
 		case "float":
 			switch val := v.(type) {
 			case float32:
-				return parquet.ValueOf(val)
+				return parquet.FloatValue(val).Level(0, 2, index)
 			case float64:
-				return parquet.ValueOf(float32(val))
+				return parquet.FloatValue(float32(val)).Level(0, 2, index)
 			case int:
-				return parquet.ValueOf(float32(val))
+				return parquet.FloatValue(float32(val)).Level(0, 2, index)
 			case int64:
-				return parquet.ValueOf(float32(val))
+				return parquet.FloatValue(float32(val)).Level(0, 2, index)
 			case string:
 				if f, err := strconv.ParseFloat(val, 32); err == nil {
-					return parquet.ValueOf(float32(f))
+					return parquet.FloatValue(float32(f)).Level(0, 2, index)
 				}
 			}
-			return parquet.NullValue()
+			return parquet.NullValue().Level(0, 1, index)
 
 		case "double":
 			switch val := v.(type) {
 			case float64:
-				return parquet.ValueOf(val)
+				return parquet.DoubleValue(val).Level(0, 2, index)
 			case float32:
-				return parquet.ValueOf(float64(val))
+				return parquet.DoubleValue(float64(val)).Level(0, 2, index)
 			case int:
-				return parquet.ValueOf(float64(val))
+				return parquet.DoubleValue(float64(val)).Level(0, 2, index)
 			case int64:
-				return parquet.ValueOf(float64(val))
+				return parquet.DoubleValue(float64(val)).Level(0, 2, index)
 			case string:
 				if f, err := strconv.ParseFloat(val, 64); err == nil {
-					return parquet.ValueOf(f)
+					return parquet.DoubleValue(f).Level(0, 2, index)
 				}
 			}
-			return parquet.NullValue()
+			return parquet.NullValue().Level(0, 1, index)
 
 		case "boolean":
 			switch val := v.(type) {
 			case bool:
-				return parquet.ValueOf(val)
+				return parquet.BooleanValue(val)
 			case string:
 				if b, err := strconv.ParseBool(val); err == nil {
-					return parquet.ValueOf(b)
+					return parquet.BooleanValue(b).Level(0, 2, index)
 				}
 			}
-			return parquet.NullValue()
+			return parquet.NullValue().Level(0, 1, index)
 		case "string":
 			switch val := v.(type) {
 			case string:
-				return parquet.ByteArrayValue([]byte(val))
+				return parquet.ByteArrayValue([]byte(val)).Level(0, 2, index)
 			case []byte:
-				return parquet.ByteArrayValue(val)
+				return parquet.ByteArrayValue(val).Level(0, 2, index)
 			default:
 				s := fmt.Sprintf("%v", v)
-				return parquet.ByteArrayValue([]byte(s))
+				return parquet.ByteArrayValue([]byte(s)).Level(0, 2, index)
 			}
 		}
 	}
-	return parquet.ByteArrayValue([]byte(fmt.Sprintf("%v", v)))
+	return parquet.ByteArrayValue([]byte(fmt.Sprintf("%v", v))).Level(0, 2, index)
 }
 
 // inferField 推断字段类型
