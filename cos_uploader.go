@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -54,7 +55,6 @@ func NewCOSUploader(role string, bucketName string, region string) *COSUploader 
 		bucketURL:  bucketURL,
 		httpClient: &http.Client{Timeout: 2 * time.Second},
 	}
-
 	go u.autoRefresh()
 
 	return u
@@ -89,6 +89,21 @@ func (u *COSUploader) fetchCredential() (*MetadataCredential, error) {
 	}
 
 	return &data, nil
+}
+
+func (u *COSUploader) fetchInstanceId() (string, error) {
+	resp, err := u.httpClient.Get("http://metadata.tencentyun.com/latest/meta-data/instance-id")
+	if err != nil {
+		return "", err
+	}
+
+	defer resp.Body.Close()
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response body: %w", err)
+	}
+	instanceId := strings.TrimSpace(string(bodyBytes))
+	return instanceId, nil
 }
 
 func (u *COSUploader) refresh() error {
@@ -132,9 +147,7 @@ func (u *COSUploader) updateCredential(c Credential) {
 }
 
 func (u *COSUploader) buildCOSClient() {
-
 	bucketURL, _ := url.Parse(u.bucketURL)
-
 	b := &cos.BaseURL{BucketURL: bucketURL}
 	if len(u.cred.SecretId) > 8 {
 		log.Printf("[parquet] new SecretID %s...%s\n", u.cred.SecretId[:4], u.cred.SecretId[len(u.cred.SecretId)-4:])

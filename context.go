@@ -24,9 +24,11 @@ type Config struct {
 	Compression  string // snappy | gzip | zstd | none
 
 	// Schema settings
-	TimeZone    string
-	SortedField string
-	FieldTypes  map[string]string
+	TimeZone      string
+	SortedField   string
+	FieldTypes    map[string]string
+	InstanceId    string
+	InstanceField string
 }
 
 // PluginContext carries per-instance state
@@ -44,7 +46,7 @@ func NewPluginContext(plugin unsafe.Pointer) (*PluginContext, error) {
 	}
 	uploader := NewCOSUploader(cfg.Role, cfg.BucketName, cfg.Region)
 	writer := NewParquetWriter(cfg, uploader)
-
+	cfg.InstanceId, err = uploader.fetchInstanceId()
 	return &PluginContext{
 		cfg:      cfg,
 		writer:   writer,
@@ -71,6 +73,7 @@ func (p *PluginContext) Flush(data unsafe.Pointer, length int, tag string) int {
 		// Attach timestamp
 		row["__TIMESTAMP__"] = fluentTimestampToUnixMilli(ts)
 		row["__TAG__"] = tag
+		row[p.cfg.InstanceField] = p.cfg.InstanceId
 
 		if err := p.writer.WriteRow(row); err != nil {
 			fmt.Printf("[parquet] WriteRow error: %v\n", err)
@@ -107,12 +110,13 @@ func normalize(v interface{}) interface{} {
 // loadConfig reads all plugin parameters with sensible defaults.
 func loadConfig(plugin unsafe.Pointer) (*Config, error) {
 	cfg := &Config{
-		BatchSize:    1024,
-		BatchTimeout: 60,
-		Compression:  "none",
-		PathPrefix:   "fluent-bit/",
-		TimeZone:     "Asia/Tokyo",
-		FieldTypes:   make(map[string]string),
+		BatchSize:     1024,
+		BatchTimeout:  60,
+		Compression:   "none",
+		PathPrefix:    "fluent-bit/",
+		TimeZone:      "Asia/Tokyo",
+		InstanceField: "instance_id",
+		FieldTypes:    make(map[string]string),
 	}
 
 	get := func(key string) string {
@@ -167,6 +171,10 @@ func loadConfig(plugin unsafe.Pointer) (*Config, error) {
 			return nil, fmt.Errorf("invalid BatchTimeout: %s", v)
 		}
 		cfg.BatchTimeout = n
+	}
+
+	if v := get("InstanceField"); v != "" {
+		cfg.InstanceField = v
 	}
 
 	if v := get("FieldTypes"); v != "" {
