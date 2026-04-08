@@ -122,7 +122,7 @@ func (pw *ParquetWriter) flushLocked() error {
 func (pw *ParquetWriter) encode(
 	rows []map[string]interface{},
 ) ([]byte, error) {
-	schema := parquet.NewSchema("root", parquet.Optional(pw.schema))
+	schema := parquet.NewSchema("root", pw.schema)
 	var buf bytes.Buffer
 	writer := parquet.NewWriter(
 		&buf,
