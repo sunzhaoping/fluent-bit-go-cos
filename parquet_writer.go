@@ -122,27 +122,24 @@ func (pw *ParquetWriter) flushLocked() error {
 func (pw *ParquetWriter) encode(
 	rows []map[string]interface{},
 ) ([]byte, error) {
-	schama := parquet.NewSchema("record", pw.schema)
+	schema := parquet.NewSchema("root", parquet.Optional(pw.schema))
 	var buf bytes.Buffer
 	writer := parquet.NewWriter(
 		&buf,
-		schama,
+		schema,
 		parquet.DataPageVersion(1),
 		parquet.Compression(pw.compressionCodec()),
 	)
-	parquetRows := make([]parquet.Row, 0, len(rows))
 	for _, row := range rows {
 		builder := parquet.NewRowBuilder(pw.schema)
 		for index, col := range pw.columns {
 			v := row[col]
 			builder.Add(index, pw.convertToParquetValue(v, col))
 		}
-		parquetRows = append(parquetRows, builder.Row())
+		if err := writer.Write(builder.Row()); err != nil {
+			return nil, fmt.Errorf("write row: %w", err)
+		}
 	}
-	if _, err := writer.WriteRows(parquetRows); err != nil {
-		return nil, fmt.Errorf("write row: %w", err)
-	}
-
 	if err := writer.Close(); err != nil {
 		return nil, fmt.Errorf("close writer: %w", err)
 	}
@@ -265,17 +262,17 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string) parqu
 func (pw *ParquetWriter) GetFieldType(name string) parquet.Node {
 	if t, ok := pw.cfg.FieldTypes[name]; ok {
 		switch t {
-		case "timestamp_nano":
+		case "timestamp_nanos":
 			return parquet.Optional(
 				parquet.Timestamp(parquet.Nanosecond),
 			)
 
-		case "timestamp_milli":
+		case "timestamp_millis":
 			return parquet.Optional(
 				parquet.Timestamp(parquet.Millisecond),
 			)
 
-		case "timestamp_micro":
+		case "timestamp_micros":
 			return parquet.Optional(
 				parquet.Timestamp(parquet.Microsecond),
 			)
@@ -299,8 +296,7 @@ func (pw *ParquetWriter) GetFieldType(name string) parquet.Node {
 			return parquet.Optional(
 				parquet.Leaf(parquet.DoubleType),
 			)
-
-		case "bool":
+		case "boolean":
 			return parquet.Optional(
 				parquet.Leaf(parquet.BooleanType),
 			)
@@ -308,6 +304,26 @@ func (pw *ParquetWriter) GetFieldType(name string) parquet.Node {
 		case "string":
 			return parquet.Optional(
 				parquet.String(),
+			)
+
+		case "uuid":
+			return parquet.Optional(
+				parquet.UUID(),
+			)
+
+		case "json":
+			return parquet.Optional(
+				parquet.JSON(),
+			)
+
+		case "bytearray":
+			return parquet.Optional(
+				parquet.Leaf(parquet.ByteArrayType),
+			)
+
+		case "date":
+			return parquet.Optional(
+				parquet.Date(),
 			)
 		}
 	}
