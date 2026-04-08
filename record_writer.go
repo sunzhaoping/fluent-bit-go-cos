@@ -107,9 +107,12 @@ func (jw *JsonWriter) encode(rows []map[string]interface{}) ([]byte, error) {
 		log.Printf(string(val))
 		buf.WriteString(string(val))
 	}
-	var compressed bytes.Buffer
-	jw.compress.Encode(compressed.Bytes(), buf.Bytes())
-	return compressed.Bytes(), nil
+	out, err := jw.compress.Encode(nil, buf.Bytes())
+	if err != nil {
+		return nil, err
+	}
+
+	return out, nil
 }
 
 func (jw *JsonWriter) compressionCodec() compress.Codec {
