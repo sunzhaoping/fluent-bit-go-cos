@@ -104,7 +104,6 @@ func (jw *JsonWriter) encode(rows []map[string]interface{}) ([]byte, error) {
 	var buf bytes.Buffer
 	for _, row := range rows {
 		val, _ := json.Marshal(row)
-		log.Printf(string(val))
 		buf.WriteString(string(val))
 	}
 	out, err := jw.compress.Encode(nil, buf.Bytes())
