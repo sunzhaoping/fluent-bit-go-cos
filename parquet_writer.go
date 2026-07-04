@@ -160,7 +160,7 @@ func (pw *ParquetWriter) encode(
 
 func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string, index int) parquet.Value {
 	if v == nil {
-		return parquet.NullValue().Level(0, 1, index)
+		return parquet.NullValue().Level(0, 0, index)
 	}
 	if t, ok := pw.cfg.FieldTypes[name]; ok {
 		switch t {
@@ -327,7 +327,7 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string, index
 		case "boolean":
 			switch val := v.(type) {
 			case bool:
-				return parquet.BooleanValue(val)
+				return parquet.BooleanValue(val).Level(0, 1, index)
 			case string:
 				if b, err := strconv.ParseBool(val); err == nil {
 					return parquet.BooleanValue(b).Level(0, 1, index)
@@ -347,7 +347,7 @@ func (pw *ParquetWriter) convertToParquetValue(v interface{}, name string, index
 			}
 		}
 	}
-	return parquet.ByteArrayValue([]byte(fmt.Sprintf("%v", v))).Level(0, 1, index)
+	return parquet.NullValue().Level(0, 0, index)
 }
 
 // inferField 推断字段类型
