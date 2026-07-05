@@ -395,7 +395,7 @@ func (pw *ParquetWriter) GetFieldType(name string) parquet.Node {
 
 		case "string":
 			return parquet.Optional(
-				parquet.String(),
+				parquet.Encoded(parquet.String(), parquet.parquet.Plain),
 			)
 
 		case "uuid":
@@ -410,7 +410,7 @@ func (pw *ParquetWriter) GetFieldType(name string) parquet.Node {
 
 		case "bytearray":
 			return parquet.Optional(
-				parquet.Leaf(parquet.ByteArrayType),
+				parquet.Encoded(parquet.Leaf(parquet.ByteArrayType),,parquet.parquet.Plain),
 			)
 
 		case "date":
